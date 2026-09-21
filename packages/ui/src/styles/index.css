@@ -1,0 +1,7 @@
+/* Порядок важен: примитивы → семантика → база. Потребитель импортирует tailwindcss ДО этого файла. */
+/* Шрифты — self-host (OFL-1.1), не Google CDN. unicode-range: браузер качает только нужные подмножества. */
+@import "@fontsource-variable/montserrat/wght.css";
+@import "@fontsource-variable/roboto/wght.css";
+@import "./colors.css";
+@import "./tokens.css";
+@import "./base.css";

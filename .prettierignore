@@ -1,0 +1,13 @@
+dist
+node_modules
+pnpm-lock.yaml
+mockups
+**/routeTree.gen.ts
+
+# отчёты и трейсы Playwright (e2e/)
+playwright-report
+test-results
+
+# сгенерированные типы контракта: их формат задаёт openapi-typescript,
+# prettier переписал бы их и ломал проверку «повторный generate без диффа»
+packages/api-contracts/src/generated

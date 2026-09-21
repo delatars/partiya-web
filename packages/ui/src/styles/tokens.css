@@ -1,0 +1,65 @@
+/* Семантический слой → Tailwind 4 @theme. Утилиты: bg-page, text-muted, bg-action, rounded-card … */
+@theme {
+  --font-heading: "Montserrat Variable", "Montserrat", system-ui, sans-serif;
+  --font-sans: "Roboto Variable", "Roboto", system-ui, sans-serif;
+
+  --color-page: var(--slate-50);
+  --color-surface: var(--white);
+  --color-subtle: var(--slate-100);
+  --color-border: var(--slate-200);
+  --color-border-strong: var(--slate-300);
+  --color-text: var(--slate-900);
+  --color-muted: var(--slate-500);
+
+  /* ховер строки таблицы и блик скелетона — на полтона светлее поверхности страницы */
+  --color-row-hover: var(--slate-25);
+
+  --color-header: var(--navy-900);
+  --color-header-hover: var(--navy-700);
+
+  --color-action: var(--blue-600);
+  --color-action-hover: var(--blue-700);
+  --color-action-soft: var(--blue-50);
+  /* акцент поверх тёмной подложки: тост, шапка */
+  --color-action-on-dark: var(--blue-300);
+
+  /* скидки: повтор партии, недозагруз — отдельно от акцента действия */
+  --color-discount: var(--violet-600);
+  --color-discount-soft: var(--violet-50);
+
+  /* статусы — не акцент */
+  --color-success: var(--green-600);
+  --color-success-soft: var(--green-50);
+  --color-warning: var(--amber-600);
+  --color-warning-text: var(--amber-800);
+  --color-warning-soft: var(--amber-50);
+  --color-danger: var(--red-600);
+  --color-danger-soft: var(--red-50);
+
+  --radius-card: 10px;
+  --radius-control: 6px;
+
+  --container-page: 1320px;
+  --container-narrow: 1040px;
+  /* колонка бокового меню кабинета и бэк-офиса */
+  --spacing-sidebar: 232px;
+
+  /* тёмная поверхность бэк-офиса */
+  --color-ink-surface: var(--slate-900);
+
+  --shadow-tray: 0 -6px 24px -12px rgb(0 0 0 / 0.2);
+  --shadow-card-hover: 0 8px 24px -10px rgb(14 36 71 / 0.25);
+
+  /* брейкпоинты макета */
+  --breakpoint-sm: 560px;
+  --breakpoint-md: 900px;
+  --breakpoint-lg: 1100px;
+
+  /* бегущий блик скелетона (.skel макета) */
+  --animate-shimmer: shimmer 1.4s linear infinite;
+  @keyframes shimmer {
+    to {
+      background-position: -200% 0;
+    }
+  }
+}

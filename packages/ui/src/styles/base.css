@@ -1,0 +1,68 @@
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  body {
+    background: var(--color-page);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-action);
+    outline-offset: 2px;
+  }
+}
+
+@utility num {
+  font-variant-numeric: tabular-nums;
+}
+@utility price {
+  font-family: var(--font-heading);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Заглушки фото: .ph.A–D макета. Только заливка — геометрию задаёт компонент. */
+@utility ph-a {
+  background-image: linear-gradient(140deg, var(--ph-a-from), var(--ph-a-to));
+}
+@utility ph-b {
+  background-image: linear-gradient(140deg, var(--ph-b-from), var(--ph-b-to));
+}
+@utility ph-c {
+  background-image: linear-gradient(140deg, var(--ph-c-from), var(--ph-c-to));
+}
+@utility ph-d {
+  background-image: linear-gradient(140deg, var(--ph-d-from), var(--ph-d-to));
+}
+
+/* Штриховка иллюстрации пустого состояния (.empty .ill макета) */
+@utility hatch {
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--color-subtle) 0 8px,
+    var(--color-surface) 8px 16px
+  );
+}
+
+/* Подложка скелетона; движение даёт утилита animate-shimmer */
+@utility skeleton-bg {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-subtle) 25%,
+    var(--color-row-hover) 50%,
+    var(--color-subtle) 75%
+  );
+  background-size: 200% 100%;
+}

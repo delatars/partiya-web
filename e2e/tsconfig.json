@@ -1,0 +1,11 @@
+{
+  "//": "Типы Node берём из apps/web: @types/node стоит там, в корне его нет, а заводить ради e2e вторую копию незачем.",
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "module": "Preserve",
+    "moduleResolution": "bundler",
+    "typeRoots": ["../apps/web/node_modules/@types", "../node_modules/@types"],
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"]
+}

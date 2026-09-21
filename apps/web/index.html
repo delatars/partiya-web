@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Партия</title>
+    <!-- seo:head — для публичных маршрутов сюда подставляет мету, JSON-LD и window.__INITIAL__
+         модуль seo в partiya-api; заголовок выше он при этом заменяет своим (crates/seo/src/shell.rs).
+         Без бэкенда (vite dev, статика за nginx) остаются значения по умолчанию. -->
+  </head>
+  <body>
+    <div id="root"><!-- seo:body --></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

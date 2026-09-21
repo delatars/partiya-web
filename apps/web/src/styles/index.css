@@ -1,0 +1,5 @@
+@import "tailwindcss";
+@import "@partiya/ui/styles";
+
+/* Tailwind 4 сканирует только приложение — показываем ему исходники дизайн-системы */
+@source "../../../../packages/ui/src";

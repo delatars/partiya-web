@@ -1,0 +1,37 @@
+/* Примитивы палитры «Ленты». Источник — :root макета mockups/lenta/lenta.css.
+   Компоненты примитивы напрямую НЕ используют — только семантику из tokens.css. */
+:root {
+  --navy-900: #0e2447;
+  --navy-700: #163a6b;
+  --blue-700: #1247bf;
+  --blue-600: #1859e6;
+  --blue-50: #e7eefc;
+  --violet-600: #7a3fd1;
+  --violet-50: #f0e8fb;
+  --green-600: #1e9e5a;
+  --green-50: #e3f5ea;
+  --amber-600: #e08a00;
+  --amber-800: #9a5f00;
+  --amber-50: #fff3df;
+  --red-600: #e3312d;
+  --red-50: #fce7e6;
+  --blue-300: #9dbbff;
+  --slate-900: #141a24;
+  --slate-500: #6a7383;
+  --slate-300: #cbd2db;
+  --slate-200: #e1e5eb;
+  --slate-100: #edf0f4;
+  --slate-50: #f2f4f7;
+  --slate-25: #f8fafc;
+  --white: #ffffff;
+
+  /* Градиенты заглушек фото (.ph A–D макета). Декоративные, семантики не имеют. */
+  --ph-a-from: #eaeae6;
+  --ph-a-to: #d0d2cb;
+  --ph-b-from: #e6e8ed;
+  --ph-b-to: #c6cbd5;
+  --ph-c-from: #f2e9df;
+  --ph-c-to: #decbb3;
+  --ph-d-from: #ecebe3;
+  --ph-d-to: #d3cfbd;
+}

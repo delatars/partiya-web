@@ -1,0 +1,17 @@
+name: Подготовка окружения
+description: pnpm + Node из .nvmrc, установка зависимостей по локу, кэш стора pnpm.
+
+runs:
+  using: composite
+  steps:
+    # Версия pnpm берётся из поля packageManager в package.json — отдельно её не задаём.
+    - uses: pnpm/action-setup@v6
+
+    - uses: actions/setup-node@v7
+      with:
+        node-version-file: .nvmrc
+        cache: pnpm
+
+    - name: Зависимости по локу
+      shell: bash
+      run: pnpm install --frozen-lockfile
