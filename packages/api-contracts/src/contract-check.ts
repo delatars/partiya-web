@@ -95,6 +95,13 @@ type Request<Back, Front extends Loose<Back>> = [Back, Front];
     удаление любого из них всё равно валит сборку — молча разойтись они не могут. */
 type Known<Front, Back> = [Front, Back];
 
+/** Бэк обязан ОБЪЯВИТЬ каждое поле рукописного типа — хотя бы необязательным.
+    `Response` по Q-141 считает «необязательного поля нет» нормой, и так незаметно
+    пропали шесть полей «Повторных партий» в `OrderListItem` (Q-435): моки их отдавали,
+    бэк — нет, экран рисовал «Было 0 ₽ · Повторить −0 %». Для типов, где экран живёт
+    на необязательных полях, `Declares` ловит именно пропажу ключа из схемы бэка. */
+type Declares<Back, K extends keyof Back> = [Back, K];
+
 /* ── Самотесты нормализации ───────────────────────────────────────────────── */
 /* Проверяют саму утилиту: совместимые пары компилируются, несовместимые обязаны падать
    (`@ts-expect-error` — если такая строка вдруг станет валидной, tsc ругнётся на
@@ -178,6 +185,10 @@ export type SelfDeepMissing = Response<SelfFrontDeep, SelfBackDeepMissing>;
 export type SelfRequestMissing = Request<SelfFrontRequired, SelfBackMissing>;
 // @ts-expect-error — тело запроса: поле переименовано, бэк ждёт `comment`, фронт шлёт `note`.
 export type SelfRequestRenamed = Request<SelfBackBodyRenamed, SelfFrontRequired>;
+/* `Declares`: необязательное поле фронта бэк обязан хотя бы объявить. */
+export type SelfDeclaresOk = Declares<SelfBackNullable, keyof SelfFrontOptional>;
+// @ts-expect-error — бэк не объявил необязательное поле `note`, которое читает экран.
+export type SelfDeclaresMissing = Declares<SelfBackMissing, keyof SelfFrontOptional>;
 
 /* ══════════════════════════════════════════════════════════════════════════
    iam · вход, организации, сессии  (http/auth.ts)
@@ -235,6 +246,11 @@ export type CreateOrderDraftRes = Response<C.Order, Res<"createOrderDraft", 201>
 
 export type GetOrder = Response<C.Order, Res<"getOrder">>;
 export type ListOrders = Response<C.OrderList, Res<"listOrders">>;
+/* Раздел «Повторные партии» целиком на необязательных полях строки (Q-435). */
+export type ListOrdersItemKeys = Declares<
+  Res<"listOrders">["items"][number],
+  keyof C.OrderListItem
+>;
 
 export type UpdateOrderDraft = Request<Req<"updateOrderDraft">, C.UpdateOrderDraftBody>;
 export type UpdateOrderDraftRes = Response<C.Order, Res<"updateOrderDraft">>;

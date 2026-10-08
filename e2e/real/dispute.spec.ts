@@ -130,8 +130,12 @@ test("спор: претензия из приёмки → ответ завод
     split.customerAmount + split.factoryAmount + split.fee,
     "возврат + выплата + комиссия = эскроу",
   ).toEqual(card.escrowAmount);
-  /* Комиссия — только с доли завода (Q-194). */
-  expect(split.fee).toEqual(Math.round(((card.escrowAmount - split.customerAmount) * 8) / 100));
+  /* Комиссия — только с доли завода (Q-194) и без доставки (DECISIONS п.2):
+     доставка остаётся заводу целиком (Q-341). Доставка до Коледино из сида — 9 400 ₽. */
+  const deliveryKop = 9_400 * 100;
+  expect(split.fee).toEqual(
+    Math.round(((card.escrowAmount - split.customerAmount - deliveryKop) * 8) / 100),
+  );
 
   /* ── 5. Деньги видны заводу ───────────────────────────────────────────── */
   await logout(page);

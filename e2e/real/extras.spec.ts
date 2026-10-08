@@ -147,7 +147,11 @@ test("повтор принятой партии идёт со скидкой �
   });
 
   await page.goto("/account/repeat");
-  await expect(main).toContainText(`№ ${orderId}`, { timeout: 30_000 });
+  // Номера заказа текстом в строке повтора нет (макет `repeat`): строка узнаётся по
+  // ссылке на заказ и полю объёма «Объём повтора заказа № N» (Q-436).
+  await expect(main.getByLabel(`Объём повтора заказа № ${orderId}`)).toBeVisible({
+    timeout: 30_000,
+  });
   const repeat = main.getByRole("button", { name: /Повторить −9 %/u }).first();
   await expect(repeat, "скидка повтора приходит с карточки предложения").toBeVisible();
 

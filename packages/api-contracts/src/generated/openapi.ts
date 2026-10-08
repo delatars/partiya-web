@@ -4872,6 +4872,11 @@ export interface components {
             disputeOpen: boolean;
             /** @description «Волна, Иваново». */
             factory: string;
+            /**
+             * Format: int32
+             * @description Свободная мощность по офферу, %; оффер снят — поля нет.
+             */
+            freeCapacityPct?: number | null;
             /** Format: int32 */
             id: number;
             /** Format: int32 */
@@ -4881,12 +4886,35 @@ export interface components {
              * @description Готовность партии, % — проекция статуса. У черновика 0.
              */
             progressPct: number;
+            /**
+             * Format: int32
+             * @description Объём партии, шт.
+             */
+            qty: number;
+            /**
+             * Format: int64
+             * @description Сколько раз этот оффер уже заказывался (оформленные партии заказчика).
+             */
+            repeatCount?: number | null;
+            /**
+             * Format: int32
+             * @description Скидка за повтор у этой фабрики, % — из активной версии оффера, как
+             *     `Order.repeatDiscountPercent` (Q-344). Нет скидки или оффер снят — поля нет.
+             */
+            repeatDiscountPercent?: number | null;
             shipDate?: string | null;
+            /** @description Краткая спецификация: «белый 300 · чёрный 200, S–M–L–XL, шелкография 2 цв.». */
+            spec: string;
             status: components["schemas"]["OrderStatus"];
             /** @description «Футболки 180 г/м², 1 000 шт». */
             title: string;
             /** Format: int64 */
             total: number;
+            /**
+             * Format: int64
+             * @description Цена за штуку в прошлой партии (из снимка котировки).
+             */
+            unitPrice?: number | null;
             /**
              * Format: int64
              * @description Непрочитанных сообщений чата — бейдж в строке таблицы.

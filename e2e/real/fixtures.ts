@@ -256,11 +256,10 @@ export async function runOrderToAcceptance(
   await page.waitForURL(/\/order\/\d+\/pay/u, { timeout: 90_000 });
   const orderId = /\/order\/(\d+)\/pay/u.exec(page.url())?.[1] ?? "";
   expect(orderId, "номер заказа со страницы счёта").not.toEqual("");
-  const purpose = await main
-    .getByText(/Оплата по заказу № \d+/u)
-    .first()
-    .innerText();
-  const dealNo = /сделка (\d+)/u.exec(purpose)?.[1] ?? "";
+  /* Назначение платежа везде с номером заказа (DECISIONS п.6): по нему же
+     оператор находит счёт в очереди «Ожидают поступления». */
+  const reference = `Оплата по заказу № ${orderId},`;
+  await expect(main.getByText(reference).first()).toBeVisible();
 
   // Оператор: деньги пришли.
   await logout(page);
@@ -270,7 +269,7 @@ export async function runOrderToAcceptance(
     .locator("table")
     .first()
     .locator("tbody tr")
-    .filter({ hasText: `№ ${dealNo}-` });
+    .filter({ hasText: reference });
   await expect(invoice).toHaveCount(1);
   await invoice.getByRole("button", { name: "Подтвердить поступление" }).click();
   await expect(invoice).toHaveCount(0, { timeout: 30_000 });

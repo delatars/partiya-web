@@ -89,16 +89,10 @@ test("сквозной заказ: регистрация → оформлени
   expect(orderId).not.toEqual("");
   await expect(main).toContainText(/Счёт|эскроу/u);
   await expect(main).toContainText("183 400 ₽");
-  /* Номер сделки со счёта: в очереди оператора счёт подписан им же («№ 4902-1»),
-     а номер заказа туда не попадает. Заодно видно расхождение двух формулировок
-     назначения платежа — см. отчёт. */
-  const purpose = await main
-    .getByText(/Оплата по заказу № \d+/u)
-    .first()
-    .innerText();
-  const dealNo = /сделка (\d+)/u.exec(purpose)?.[1] ?? "";
-  expect(dealNo, purpose).not.toEqual("");
-  const dealRef = `№ ${dealNo}-`;
+  /* Назначение платежа везде с номером заказа (DECISIONS п.6): заказчик видит ту же
+     строку, что оператор в очереди «Ожидают поступления». */
+  const dealRef = `Оплата по заказу № ${orderId},`;
+  await expect(main.getByText(dealRef).first()).toBeVisible();
 
   /* ── 4. Оператор подтверждает поступление денег ───────────────────────── */
   await logout(page);
@@ -119,7 +113,7 @@ test("сквозной заказ: регистрация → оформлени
   await loginByPhone(page, FACTORY_PHONE);
   await page.goto(`/seller/orders/${orderId}`);
   await expect(main).toContainText(`№ ${orderId}`);
-  await expect(main).toContainText("168 728 ₽");
+  await expect(main).toContainText("169 480 ₽");
   await page.getByRole("button", { name: "Подтвердить заказ" }).click();
   await expect(main).toContainText("Отправить макет технологу");
 
@@ -254,9 +248,9 @@ test("сквозной заказ: регистрация → оформлени
   });
   await expect(main).toContainText(/Получен|Завершён|Принят/u, { timeout: 30_000 });
 
-  /* ── 14. Деньги завода: 168 728 ₽ на `/finance` ───────────────────────── */
+  /* ── 14. Деньги завода: 169 480 ₽ на `/finance` ───────────────────────── */
   await logout(page);
   await loginByPhone(page, FACTORY_PHONE);
   await page.goto("/finance");
-  await expect(main).toContainText("168 728 ₽", { timeout: 30_000 });
+  await expect(main).toContainText("169 480 ₽", { timeout: 30_000 });
 });
