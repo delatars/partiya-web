@@ -13,9 +13,21 @@ import type {
   AdminOfferDecisionBody,
   AdminOfferList,
   AdminOfferListQuery,
+  AdminOverdueActionResult,
+  AdminOverdueDisputeBody,
+  AdminOverdueExtendBody,
+  AdminOverdueTranche,
+  AdminOverdueTrancheCount,
+  AdminOverdueTranchePage,
   AdminOverview,
   AdminPayoutRow,
   AdminRanking,
+  AdminStuckActionBody,
+  AdminStuckCard,
+  AdminStuckCount,
+  AdminStuckKind,
+  AdminStuckPage,
+  AdminStuckQuery,
   AdminTaxonomy,
   AdminTrancheRow,
   AdminTranchesPage,
@@ -23,6 +35,7 @@ import type {
   ConfirmFundsRequest,
   Dispute,
   Me,
+  Order,
   PayoutConfirmedRequest,
   PromoCode,
   RankingPreview,
@@ -35,7 +48,8 @@ import type {
 } from "@partiya/api-contracts";
 
 import { ApiError } from "@/shared/api";
-import { formatIsoDate } from "@/shared/lib/dates";
+import { CATEGORIES } from "@/shared/lib/categories";
+import { addWorkingDays, formatIsoDate } from "@/shared/lib/dates";
 import { DEMO_ORG_IDS, factoryOrgIdOf } from "@/shared/lib/demo";
 import { distributeEscrow, isBalanced } from "@/shared/lib/dispute-escrow";
 import { formatRub } from "@/shared/lib/format";
@@ -48,9 +62,22 @@ import {
 } from "@/shared/mocks";
 
 import type { MockState } from "./mock-backend";
-import { platformFeeOf } from "./mock-projections";
+import {
+  firstTrancheAmount,
+  formatMsk,
+  invoiceNumberOf,
+  isSplitPayment,
+  MANUAL_EXTENSION_MAX_HOURS,
+  markOrderDelivered,
+  orderFeeOf,
+  orderPayoutOf,
+  paymentPurpose,
+  secondTrancheAmount,
+  settleSecondTranche,
+} from "./mock-projections";
 import { messagesOf, type MockOrder, type NewOrderEvent } from "./mock-seed";
 import { confirmDeadline } from "./mock-seller-seed";
+import { createStuckApi, seedStuck, type StuckStore } from "./mock-stuck";
 
 /* Мок бэк-офиса оператора — ARCHITECTURE.md, раздел 9.
  *
@@ -104,6 +131,8 @@ export interface BackofficeStore {
   taxonomy: AdminTaxonomy;
   /** Комментарии ручных операций — аудит-лог раздела 9. */
   auditLog: { at: string; actor: string; action: string; comment: string }[];
+  /** «Зависшие» (п. 35). Необязательно: состояние из старого sessionStorage его не знает. */
+  stuck?: StuckStore;
 }
 
 const DEFAULT_WEIGHTS: RankingWeight[] = [
@@ -242,15 +271,15 @@ function seedTaxonomy(): AdminTaxonomy {
           },
         ],
       },
-      {
-        slug: "kosmetika",
-        path: ["kosmetika"],
-        title: "Косметика и БАДы",
-        offersCount: 86,
+      /* Остальные корни — та же таблица, что в каталоге (п. 28, Q-415): без схемы атрибутов
+         и пока без офферов. */
+      ...CATEGORIES.filter((node) => node.slug !== "tekstil").map((node) => ({
+        slug: node.slug,
+        path: [node.slug],
+        title: node.title,
+        offersCount: node.offers,
         children: [],
-      },
-      { slug: "svechi", path: ["svechi"], title: "Свечи и декор", offersCount: 132, children: [] },
-      { slug: "upakovka", path: ["upakovka"], title: "Упаковка", offersCount: 167, children: [] },
+      })),
     ],
     selected: {
       path: ["tekstil", "futbolki"],
@@ -379,6 +408,10 @@ export interface BackofficeContext {
   emit: (orderId: number, event: NewOrderEvent) => void;
   touch: (order: MockOrder) => void;
   ensureFactorySeed: () => void;
+  /** Заказ в контрактном виде — ответ `POST /admin/orders/{id}/delivered`. */
+  publicOrder: (order: MockOrder) => Order;
+  /** Открыт ли спор по заказу. */
+  disputeOpen: (orderId: number) => boolean;
 }
 
 export interface MockBackofficeSlice {
@@ -412,14 +445,42 @@ export interface MockBackofficeSlice {
   getAdminRanking(): Promise<AdminRanking>;
   updateAdminRanking(body: UpdateRankingBody): Promise<AdminRanking>;
   previewAdminRanking(body: RankingPreviewBody): Promise<RankingPreview>;
+  markAdminOrderDelivered(orderId: number): Promise<Order>;
+  listAdminStuck(query?: AdminStuckQuery): Promise<AdminStuckPage>;
+  getAdminStuckCount(): Promise<AdminStuckCount>;
+  getAdminStuckCard(kind: AdminStuckKind, id: string): Promise<AdminStuckCard>;
+  retryAdminStuck(
+    kind: AdminStuckKind,
+    id: string,
+    body: AdminStuckActionBody,
+  ): Promise<AdminStuckCard>;
+  resolveAdminStuck(
+    kind: AdminStuckKind,
+    id: string,
+    body: AdminStuckActionBody,
+  ): Promise<AdminStuckCard>;
+  listAdminOverdueTranches(): Promise<AdminOverdueTranchePage>;
+  getAdminOverdueTrancheCount(): Promise<AdminOverdueTrancheCount>;
+  extendAdminOverdueTranche(
+    orderNo: number,
+    body: AdminOverdueExtendBody,
+  ): Promise<AdminOverdueActionResult>;
+  openAdminOverdueDispute(
+    orderNo: number,
+    body: AdminOverdueDisputeBody,
+  ): Promise<AdminOverdueActionResult>;
 }
 
 const SYSTEM = { kind: "system" as const, name: "Система", orgId: null };
 const OPERATOR = { kind: "operator" as const, name: "Оператор платформы", orgId: null };
 
-/** Номер счёта по заказу: у одного заказа один транш (схема `escrow_full`). */
-function trancheIdOf(orderId: number): string {
-  return `tr-${String(orderId)}-1`;
+/** Id счёта по заказу: `tr-<заказ>-<транш>`; у 50/50 второй транш — `-2`. */
+function trancheIdOf(orderId: number, trancheNo = 1): string {
+  return `tr-${String(orderId)}-${String(trancheNo)}`;
+}
+
+function trancheNoOf(trancheId: string): number {
+  return Number(/-(\d+)$/.exec(trancheId)?.[1] ?? "1");
 }
 
 function dealIdOf(orderId: number): string {
@@ -457,6 +518,16 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
     return ensureStore();
   }
 
+  const stuck = createStuckApi({
+    now,
+    store: () => {
+      const store = ensureStore();
+      store.stuck ??= seedStuck(now());
+      return store.stuck;
+    },
+    save,
+  });
+
   function allOrders(): MockOrder[] {
     return getState().orders.filter((order) => order.status !== "draft");
   }
@@ -471,21 +542,108 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
       .filter((item): item is { order: MockOrder; dispute: Dispute } => item !== null);
   }
 
+  /* ───────── «Просроченные транши» (Q-401) ───────── */
+
+  /** Заказы, чей второй транш у оператора. Таймеры срока у мока ленивые — сперва их
+      «прокручиваем», как это сделал бы воркер. */
+  function overdueOrders(): MockOrder[] {
+    let changed = false;
+    for (const order of allOrders()) {
+      if (settleSecondTranche(order, now(), ctx.emit)) changed = true;
+    }
+    if (changed) save();
+    return allOrders()
+      .filter(
+        (order) =>
+          isSplitPayment(order) &&
+          order.secondTrancheOverdueSince != null &&
+          order.secondTranchePaidAt == null &&
+          order.secondTrancheCancelledAt == null &&
+          order.status !== "cancelled" &&
+          order.status !== "refunded",
+      )
+      .sort((a, b) =>
+        (a.secondTrancheOverdueSince ?? "").localeCompare(b.secondTrancheOverdueSince ?? ""),
+      );
+  }
+
+  function overdueRowOf(order: MockOrder): AdminOverdueTranche {
+    return {
+      orderNo: order.id,
+      orderTitle: `${order.offer.title}, ${String(order.params.qty)} шт`,
+      customerName: order.payer?.name ?? "Заказчик",
+      factoryName: order.offer.factoryName,
+      invoiceNumber: invoiceNumberOf(order.id, 2),
+      amount: secondTrancheAmount(order.quote.total),
+      heldAmount: firstTrancheAmount(order.quote.total),
+      dueAt: order.secondTrancheDueAt ?? new Date(now()).toISOString(),
+      overdueSince: order.secondTrancheOverdueSince ?? new Date(now()).toISOString(),
+      extensions: order.secondTrancheExtensions ?? 0,
+      history: (order.secondTrancheHistory ?? []).map((row) => ({ ...row })),
+    };
+  }
+
+  /** Заказ, чей второй счёт сейчас у оператора; иначе — те же 404/409, что у бэка. */
+  function requireOverdue(orderNo: number): MockOrder {
+    overdueOrders();
+    const order = getState().orders.find((row) => row.id === orderNo);
+    if (!order) throw notFound(`Заказ № ${String(orderNo)}`);
+    const payments = "https://partiya.ru/problems/payments";
+    if (!isSplitPayment(order) || order.secondTrancheDueAt == null) {
+      throw problem(
+        409,
+        `${payments}/tranche-not-overdue`,
+        "Второго счёта нет",
+        "У заказа нет выставленного второго счёта 50/50.",
+      );
+    }
+    if (order.secondTranchePaidAt != null) {
+      throw problem(
+        409,
+        `${payments}/tranche-already-paid`,
+        "Счёт уже оплачен",
+        "Второй транш поступил — заказ продолжает путь.",
+      );
+    }
+    if (order.secondTrancheCancelledAt != null) {
+      throw problem(409, `${payments}/tranche-cancelled`, "Счёт уже снят");
+    }
+    if (order.secondTrancheOverdueSince == null) {
+      throw problem(
+        409,
+        `${payments}/tranche-not-overdue`,
+        "Счёт не у оператора",
+        "Срок оплаты ещё идёт.",
+      );
+    }
+    return order;
+  }
+
   /* ───────── очередь счетов и выплат ───────── */
 
-  function trancheRowOf(order: MockOrder): AdminTrancheRow {
-    const dueAt = order.payment?.dueAt ?? new Date(now() + 48 * 3_600_000).toISOString();
+  function trancheRowOf(order: MockOrder, trancheNo: 1 | 2 = 1): AdminTrancheRow {
+    const split = isSplitPayment(order);
+    const fallbackDue = new Date(now() + 48 * 3_600_000).toISOString();
+    const dueAt =
+      trancheNo === 2
+        ? (order.secondTrancheDueAt ?? fallbackDue)
+        : (order.payment?.dueAt ?? fallbackDue);
+    const amount =
+      trancheNo === 2
+        ? secondTrancheAmount(order.quote.total)
+        : split
+          ? firstTrancheAmount(order.quote.total)
+          : (order.payment?.amountDue ?? order.quote.total);
     return {
-      trancheId: trancheIdOf(order.id),
-      trancheNo: 1,
+      trancheId: trancheIdOf(order.id, trancheNo),
+      trancheNo,
       dealId: dealIdOf(order.id),
       dealNo: 4900 + (order.id - 4700),
       payerOrgId: order.orgId,
       payeeOrgId: factoryOrgIdOf(order.offer.factoryId) ?? "",
-      amount: order.payment?.amountDue ?? order.quote.total,
-      reference:
-        order.payment?.purpose ??
-        `Оплата по заказу № ${String(order.id)}, спецификация ${String(order.id)}-С. Без НДС`,
+      amount,
+      // п. 6: в назначении — номер заказа; у 50/50 — «платёж N из 2»
+      reference: paymentPurpose(order.id, split ? { no: trancheNo, of: 2 } : undefined),
       dueAt,
       status: "awaiting_funds",
       overdue: Date.parse(dueAt) < now(),
@@ -495,8 +653,27 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
     };
   }
 
+  /** Очередь счетов: первые транши неоплаченных заказов и выставленные вторые транши
+      50/50 («готов к отгрузке», Q-342), которые ещё не оплачены. */
+  function awaitingTrancheRows(orders: readonly MockOrder[]): AdminTrancheRow[] {
+    const first = orders
+      .filter((order) => order.status === "awaiting_payment")
+      .map((order) => trancheRowOf(order, 1));
+    const second = orders
+      .filter(
+        (order) =>
+          isSplitPayment(order) &&
+          order.secondTrancheDueAt != null &&
+          order.secondTranchePaidAt == null &&
+          order.status !== "cancelled" &&
+          order.status !== "refunded",
+      )
+      .map((order) => trancheRowOf(order, 2));
+    return [...first, ...second];
+  }
+
   function payoutRowOf(order: MockOrder): AdminPayoutRow {
-    const fee = platformFeeOf(order.quote.total);
+    const fee = orderFeeOf(order);
     const updSigned = order.documents
       .filter((doc) => doc.title.startsWith("УПД"))
       .every((doc) => doc.signature === "edo_signed");
@@ -517,7 +694,6 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
 
   function financeOverview(): AdminFinanceOverview {
     const orders = allOrders();
-    const awaiting = orders.filter((order) => order.status === "awaiting_payment");
     const held = orders.filter(
       (order) =>
         order.paidAt !== null && order.status !== "completed" && order.status !== "refunded",
@@ -526,10 +702,10 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
     const escrowHeld = held.reduce((sum, order) => sum + order.quote.total, 0);
     const payouts = completed.map(payoutRowOf);
     const pending = payouts.filter((row) => row.status !== "released");
-    const feeTotal = completed.reduce((sum, order) => sum + platformFeeOf(order.quote.total), 0);
+    const feeTotal = completed.reduce((sum, order) => sum + orderFeeOf(order), 0);
     const paidOut = completed
       .filter((order) => order.payoutAt != null)
-      .reduce((sum, order) => sum + order.quote.total - platformFeeOf(order.quote.total), 0);
+      .reduce((sum, order) => sum + orderPayoutOf(order), 0);
     const nominalExpected = escrowHeld + pending.reduce((sum, row) => sum + row.amount, 0);
 
     return {
@@ -555,7 +731,7 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
       nominalActual: null,
       discrepancy: 0,
       lastCheckedAt: new Date(now()).toISOString(),
-      tranches: awaiting.map(trancheRowOf),
+      tranches: awaitingTrancheRows(orders),
       payouts,
       payoutTodayTotal: pending
         .filter((row) => row.ready)
@@ -569,7 +745,8 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
   /* ───────── карточка спора ───────── */
 
   function resolutionOptions(order: MockOrder, dispute: Dispute): AdminDisputeResolutionOption[] {
-    const total = order.quote.total;
+    // делится то, что в эскроу (у спора по просроченному второму траншу — первый транш, Q-401)
+    const total = dispute.escrowAmount;
     const affected = dispute.affectedQty ?? order.params.qty;
     const partial = Math.min(total, order.quote.unitPrice * affected);
     const build = (
@@ -578,7 +755,7 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
       description: string,
       amount: number,
     ): AdminDisputeResolutionOption => {
-      const split = distributeEscrow(total, resolution, amount);
+      const split = distributeEscrow(total, resolution, amount, order.quote.delivery);
       return {
         resolution,
         title,
@@ -701,7 +878,7 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
           .reduce((sum, order) => sum + order.quote.total, 0);
         const fee = orders
           .filter((order) => order.status === "completed")
-          .reduce((sum, order) => sum + platformFeeOf(order.quote.total), 0);
+          .reduce((sum, order) => sum + orderFeeOf(order), 0);
 
         const stageCounts: { key: string; title: string; status: string[] }[] = [
           { key: "awaiting_payment", title: "Ожидают оплаты", status: ["awaiting_payment"] },
@@ -1099,7 +1276,7 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
         if (comment.length === 0) throw commentRequired();
 
         const total = dispute.escrowAmount;
-        const split = distributeEscrow(total, body.resolution, body.amount);
+        const split = distributeEscrow(total, body.resolution, body.amount, order.quote.delivery);
         if (!isBalanced(total, split)) {
           throw problem(
             422,
@@ -1191,12 +1368,7 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
       return respond(async () => {
         await requireOperator();
         const status = query.status ?? "awaiting_funds";
-        const items =
-          status === "awaiting_funds"
-            ? allOrders()
-                .filter((order) => order.status === "awaiting_payment")
-                .map(trancheRowOf)
-            : [];
+        const items = status === "awaiting_funds" ? awaitingTrancheRows(allOrders()) : [];
         return { items, nextCursor: null };
       });
     },
@@ -1215,6 +1387,55 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
 
         const stored = state.idempotency[idempotencyKey];
         if (stored?.kind === "confirm-funds" && stored.orderId === order.id) {
+          return financeOverview();
+        }
+        if (trancheNoOf(trancheId) === 2) {
+          // 50/50, второй транш (п. 4): заказ уже в работе, статус он не меняет
+          if (
+            !isSplitPayment(order) ||
+            order.secondTrancheDueAt == null ||
+            order.secondTranchePaidAt != null ||
+            // Q-401: счёт снят под спор от имени платформы — оплатить его уже нельзя
+            order.secondTrancheCancelledAt != null
+          ) {
+            throw problem(
+              409,
+              "https://partiya.ru/problems/payments/tranche-not-awaiting",
+              "Счёт уже не ждёт оплаты",
+              `Второй транш по заказу № ${String(order.id)} не выставлен или уже оплачен.`,
+            );
+          }
+          const expectedSecond = secondTrancheAmount(order.quote.total);
+          if (body.amount != null && body.amount !== expectedSecond) {
+            throw problem(
+              422,
+              "https://partiya.ru/problems/payments/amount_mismatch",
+              "Сумма не совпала",
+              `По счёту ожидается ${formatRub(expectedSecond)}, поступило ${formatRub(body.amount)}.`,
+              { amount: [`Ожидается ${formatRub(expectedSecond)}`] },
+            );
+          }
+          const paidAt = new Date(now()).toISOString();
+          order.secondTranchePaidAt = paidAt;
+          ctx.touch(order);
+          ctx.emit(order.id, {
+            type: "money",
+            orderId: order.id,
+            occurredAt: paidAt,
+            actor: SYSTEM,
+            title: "Второй транш зарезервирован в эскроу",
+            detail: body.externalRef?.trim() || "поступление подтверждено оператором",
+            operation: "hold",
+            amount: expectedSecond,
+          });
+          state.idempotency[idempotencyKey] = { kind: "confirm-funds", orderId: order.id };
+          storeOf().auditLog.push({
+            at: paidAt,
+            actor: "Оператор",
+            action: `confirm-funds:${trancheId}`,
+            comment: body.externalRef ?? "",
+          });
+          save();
           return financeOverview();
         }
         if (order.status !== "awaiting_payment") {
@@ -1262,9 +1483,11 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
           occurredAt,
           actor: SYSTEM,
           title: "Оплата зарезервирована в эскроу",
-          detail: "деньги уйдут фабрике после приёмки заказчиком",
+          detail: isSplitPayment(order)
+            ? "первая половина; вторая — когда партия будет готова к отгрузке"
+            : "деньги уйдут фабрике после приёмки заказчиком",
           operation: "hold",
-          amount: order.quote.total,
+          amount: isSplitPayment(order) ? firstTrancheAmount(order.quote.total) : order.quote.total,
         });
         state.idempotency[idempotencyKey] = { kind: "confirm-funds", orderId: order.id };
         storeOf().auditLog.push({
@@ -1357,14 +1580,45 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
       return respond(async () => {
         await requireOperator();
         const store = storeOf();
+        // Q-363: набор полный — каждый фактор ровно раз, 0..100 (`ranking::validate`)
+        const errors: Record<string, string[]> = {};
+        const push = (field: string, message: string) => {
+          (errors[field] ??= []).push(message);
+        };
+        body.weights.forEach((item, index) => {
+          const field = `weights.${item.key}`;
+          if (!store.weights.some((known) => known.key === item.key)) {
+            push(field, "Неизвестный фактор ранжирования");
+          }
+          if (body.weights.slice(0, index).some((earlier) => earlier.key === item.key)) {
+            push(field, "Фактор указан дважды");
+          }
+          if (!Number.isInteger(item.weight) || item.weight < 0 || item.weight > 100) {
+            push(field, "Вес — целое от 0 до 100 %");
+          }
+        });
+        for (const known of store.weights) {
+          if (!body.weights.some((item) => item.key === known.key)) {
+            push(`weights.${known.key}`, `Не указан вес фактора «${known.title}»`);
+          }
+        }
+        if (Object.keys(errors).length > 0) {
+          throw problem(
+            422,
+            `${P}/weights-invalid`,
+            "Набор весов неполный или неверный",
+            "набор весов неполный или неверный",
+            errors,
+          );
+        }
         const sum = body.weights.reduce((total, item) => total + item.weight, 0);
         if (sum !== 100) {
           throw problem(
             422,
             `${P}/weights-sum`,
             "Сумма весов должна быть 100",
-            `Сейчас ${String(sum)}. Формулу нужно уметь объяснить заводу.`,
-            { weights: [`Сумма весов — ${String(sum)}, а должна быть 100`] },
+            `сумма весов ${String(sum)} вместо 100`,
+            { weights: [`Сейчас ${String(sum)} %. Сумма весов обязана быть 100 %.`] },
           );
         }
         store.weights = store.weights.map((item) => ({
@@ -1402,9 +1656,9 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
             capacity: 38,
           },
           {
-            offerId: 2187,
-            title: "Свечи в гипсовом кашпо",
-            factoryName: "Формат",
+            offerId: 2085,
+            title: "Футболки оверсайз 240 г/м²",
+            factoryName: "Кама",
             orders: 22,
             conversion: 1.2,
             capacity: 61,
@@ -1445,6 +1699,233 @@ export function createBackofficeSlice(ctx: BackofficeContext): MockBackofficeSli
         return {
           rows: preview,
           moved: preview.filter((row) => row.positionNow !== row.positionNext).length,
+        };
+      });
+    },
+
+    /* ───────── «Доставлено» оператора (п. 13, Q-332) ───────── */
+
+    markAdminOrderDelivered(orderId: number): Promise<Order> {
+      return respond(async () => {
+        await requireOperator();
+        const order = getState().orders.find((row) => row.id === orderId);
+        if (!order || order.status === "draft") throw notFound(`Заказ № ${String(orderId)}`);
+        if (order.status !== "shipped") {
+          throw problem(
+            409,
+            "https://partiya.ru/problems/orders/transition-not-allowed",
+            "Переход невозможен",
+            `«Доставлено» отмечают у отгруженной партии, сейчас — «${orderStatusTitle(order.status)}».`,
+          );
+        }
+        const occurredAt = new Date(now()).toISOString();
+        // запасной путь: трек-номера у оператора нет — поле остаётся как было
+        markOrderDelivered(order, occurredAt, OPERATOR, null, ctx.emit);
+        ctx.touch(order);
+        storeOf().auditLog.push({
+          at: occurredAt,
+          actor: "Оператор",
+          action: `order.delivered:${String(order.id)}`,
+          comment: "",
+        });
+        save();
+        return ctx.publicOrder(order);
+      });
+    },
+
+    /* ───────── «Зависшие» (п. 35) ───────── */
+
+    listAdminStuck(query?: AdminStuckQuery): Promise<AdminStuckPage> {
+      return respond(async () => {
+        await requireOperator();
+        return stuck.listAdminStuck(query);
+      });
+    },
+
+    getAdminStuckCount(): Promise<AdminStuckCount> {
+      return respond(async () => {
+        await requireOperator();
+        return stuck.getAdminStuckCount();
+      });
+    },
+
+    getAdminStuckCard(kind: AdminStuckKind, id: string): Promise<AdminStuckCard> {
+      return respond(async () => {
+        await requireOperator();
+        return stuck.getAdminStuckCard(kind, id);
+      });
+    },
+
+    retryAdminStuck(
+      kind: AdminStuckKind,
+      id: string,
+      body: AdminStuckActionBody,
+    ): Promise<AdminStuckCard> {
+      return respond(async () => {
+        await requireOperator();
+        return stuck.retryAdminStuck(kind, id, body);
+      });
+    },
+
+    resolveAdminStuck(
+      kind: AdminStuckKind,
+      id: string,
+      body: AdminStuckActionBody,
+    ): Promise<AdminStuckCard> {
+      return respond(async () => {
+        await requireOperator();
+        return stuck.resolveAdminStuck(kind, id, body);
+      });
+    },
+
+    /* ───────── «Просроченные транши» (Q-401) ───────── */
+
+    listAdminOverdueTranches(): Promise<AdminOverdueTranchePage> {
+      return respond(async () => {
+        await requireOperator();
+        const items = overdueOrders().map(overdueRowOf);
+        return { items, count: items.length };
+      });
+    },
+
+    getAdminOverdueTrancheCount(): Promise<AdminOverdueTrancheCount> {
+      return respond(async () => {
+        await requireOperator();
+        return { count: overdueOrders().length };
+      });
+    },
+
+    extendAdminOverdueTranche(
+      orderNo: number,
+      body: AdminOverdueExtendBody,
+    ): Promise<AdminOverdueActionResult> {
+      return respond(async () => {
+        await requireOperator();
+        const errors: Record<string, string[]> = {};
+        if (
+          !Number.isInteger(body.hours) ||
+          body.hours < 1 ||
+          body.hours > MANUAL_EXTENSION_MAX_HOURS
+        ) {
+          errors.hours = [`От 1 до ${String(MANUAL_EXTENSION_MAX_HOURS)} часов`];
+        }
+        const comment = body.comment.trim();
+        if (comment.length === 0) errors.comment = ["Укажите, почему продлеваете срок"];
+        if (Object.keys(errors).length > 0) {
+          throw problem(
+            422,
+            "https://partiya.ru/problems/payments/extension-invalid",
+            "Проверьте продление срока",
+            undefined,
+            errors,
+          );
+        }
+        const order = requireOverdue(orderNo);
+        const at = new Date(now()).toISOString();
+        const previousDueAt = order.secondTrancheDueAt ?? at;
+        const dueAt = new Date(now() + body.hours * 3_600_000).toISOString();
+        order.secondTrancheDueAt = dueAt;
+        order.secondTrancheExtensions = (order.secondTrancheExtensions ?? 0) + 1;
+        order.secondTrancheOverdueSince = null;
+        (order.secondTrancheHistory ??= []).push({
+          kind: "manual",
+          previousDueAt,
+          dueAt,
+          comment,
+          at,
+        });
+        ctx.touch(order);
+        ctx.emit(order.id, {
+          type: "money",
+          orderId: order.id,
+          occurredAt: at,
+          actor: OPERATOR,
+          title: `Срок оплаты второго транша продлён до ${formatMsk(dueAt)}`,
+          detail: `Счёт ${invoiceNumberOf(order.id, 2)} тот же; продлил оператор: ${comment}`,
+          operation: "invoice",
+          amount: secondTrancheAmount(order.quote.total),
+        });
+        storeOf().auditLog.push({
+          at,
+          actor: "Оператор",
+          action: `tranche.extend:${String(order.id)}`,
+          comment,
+        });
+        save();
+        return { orderNo: order.id, outcome: "extended", dueAt, disputeId: null };
+      });
+    },
+
+    openAdminOverdueDispute(
+      orderNo: number,
+      body: AdminOverdueDisputeBody,
+    ): Promise<AdminOverdueActionResult> {
+      return respond(async () => {
+        await requireOperator();
+        const comment = body.comment.trim();
+        if (comment.length === 0) throw commentRequired();
+        const order = requireOverdue(orderNo);
+        if (order.status !== "quality_control") {
+          throw problem(
+            409,
+            "https://partiya.ru/problems/disputes/not-allowed",
+            "Спор открыть нельзя",
+            "Спор от имени платформы — только по заказу на контроле качества.",
+          );
+        }
+        const state = getState();
+        const nowMs = now();
+        const at = new Date(nowMs).toISOString();
+        const held = firstTrancheAmount(order.quote.total);
+        const dispute: Dispute = {
+          id: `dsp-${String(order.id)}`,
+          orderId: order.id,
+          status: "opened",
+          reason: "other",
+          reasonTitle: "Второй транш не оплачен — спор открыт платформой",
+          affectedQty: null,
+          totalQty: order.params.qty,
+          description: `Спор открыт платформой: второй транш 50/50 не оплачен после продления срока, отгрузка невозможна. Комментарий оператора: ${comment}`,
+          remedy: "full_refund",
+          remedyAmount: held,
+          evidence: [],
+          openedAt: at,
+          openedBy: OPERATOR,
+          factoryReplyDueAt: addWorkingDays(new Date(nowMs), 2).toISOString(),
+          decisionDueAt: addWorkingDays(new Date(nowMs), 5).toISOString(),
+          decision: null,
+          escrowBlocked: true,
+          escrowAmount: held,
+          messageCount: 0,
+        };
+        state.disputes[String(order.id)] = dispute;
+        order.secondTrancheCancelledAt = at;
+        const from = order.status;
+        order.status = "dispute";
+        ctx.touch(order);
+        ctx.emit(order.id, {
+          type: "status_changed",
+          orderId: order.id,
+          occurredAt: at,
+          actor: OPERATOR,
+          title: "Открыт спор",
+          detail: `Спор открыт оператором платформы: второй транш не оплачен · ${comment}`,
+          from,
+          to: "dispute",
+          stage: customerStageOf("dispute"),
+        });
+        storeOf().auditLog.push({
+          at,
+          actor: "Оператор",
+          action: `tranche.dispute:${String(order.id)}`,
+          comment,
+        });
+        save();
+        return {
+          orderNo: order.id,
+          outcome: "dispute_opened",
+          dueAt: null,
+          disputeId: dispute.id,
         };
       });
     },

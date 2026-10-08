@@ -279,7 +279,8 @@ export async function runOrderToAcceptance(
   await logout(page);
   await loginByPhone(page, FACTORY_PHONE);
   await page.goto(`/seller/orders/${orderId}`);
-  for (const label of ["Подтвердить заказ", "Отправить макет технологу"]) {
+  // Двойная подпись макета: технолог завода согласует сам, заказчик — следом.
+  for (const label of ["Подтвердить заказ", "Отправить макет технологу", "Согласовать макет"]) {
     const button = page.getByRole("button", { name: label });
     await button.first().waitFor({ state: "visible", timeout: 30_000 });
     await button.first().click();
@@ -314,18 +315,11 @@ export async function runOrderToAcceptance(
     await expect(button).toHaveCount(0, { timeout: 30_000 });
   }
 
-  // Оператор: доставлено. Экрана под это в бэк-офисе нет (Q-332) — зовём маршрут
-  // сессией оператора, иначе окно приёмки не открывается вообще.
-  await logout(page);
-  await loginByPhone(page, OPERATOR_PHONE);
-  const delivered = await page.evaluate(async (no: string) => {
-    const response = await fetch(`/api/v1/admin/orders/${no}/delivered`, {
-      method: "POST",
-      credentials: "include",
-    });
-    return response.status;
-  }, orderId);
-  expect(delivered, "оператор отмечает партию доставленной").toBe(200);
+  // Завод: «Доставлено» с трек-номером — с этой отметки открывается окно приёмки.
+  await main.getByRole("button", { name: "Доставлено…" }).click();
+  await main.getByLabel(/Трек-номер перевозчика/u).fill("CDEK-1234567890");
+  await main.getByRole("button", { name: "Отметить «Доставлено»" }).click();
+  await expect(main).toContainText("CDEK-1234567890", { timeout: 30_000 });
 
   await logout(page);
   await loginByPhone(page, customerPhone);

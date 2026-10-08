@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { distributeEscrow, isBalanced } from "./dispute-escrow";
+import { percentOf } from "./fee";
 
 /* Инвариант один и он же главный: сумма распределения равна сумме эскроу.
    Копейка, потерянная на округлении, — это расхождение ledger с номинальным счётом. */
@@ -35,8 +36,21 @@ describe("распределение эскроу по решению спора
     const refund = 2_016_000; // 120 шт × 168 ₽
     const split = distributeEscrow(TOTAL, "partial_refund", refund);
     expect(split.customerAmount).toBe(refund);
-    expect(split.fee).toBe(Math.floor(((TOTAL - refund) * 8) / 100));
+    expect(split.fee).toBe(percentOf(TOTAL - refund, 8));
     expect(isBalanced(TOTAL, split)).toBe(true);
+  });
+
+  it("доставка без комиссии и вычитается из доли фабрики первой (п. 2, Q-341)", () => {
+    const delivery = 940_000; // 9 400 ₽
+    expect(distributeEscrow(TOTAL, "rejected", null, delivery).fee).toBe(1_392_000);
+    const refund = 2_016_000;
+    const split = distributeEscrow(TOTAL, "partial_refund", refund, delivery);
+    expect(split.fee).toBe(percentOf(TOTAL - refund - delivery, 8));
+    expect(isBalanced(TOTAL, split)).toBe(true);
+    // возврат почти всего: доля фабрики меньше доставки — комиссии нет
+    const most = distributeEscrow(TOTAL, "partial_refund", TOTAL - 500_000, delivery);
+    expect(most.fee).toBe(0);
+    expect(most.factoryAmount).toBe(500_000);
   });
 
   it("возврат больше суммы эскроу урезается до неё", () => {
@@ -58,11 +72,11 @@ describe("распределение эскроу по решению спора
     }
   });
 
-  it("остаток от округления комиссии уходит фабрике, а не теряется", () => {
-    // 8 % от 99 копеек = 7,92 → комиссия 7, фабрике 92
+  it("округление комиссии — как Money::percent, остаток уходит фабрике", () => {
+    // 8 % от 99 копеек = 7,92 → комиссия 8 («от половины вверх»), фабрике 91
     const split = distributeEscrow(99, "rejected");
-    expect(split.fee).toBe(7);
-    expect(split.factoryAmount).toBe(92);
+    expect(split.fee).toBe(8);
+    expect(split.factoryAmount).toBe(91);
     expect(isBalanced(99, split)).toBe(true);
   });
 });

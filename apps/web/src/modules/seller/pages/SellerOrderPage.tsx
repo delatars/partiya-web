@@ -1,4 +1,4 @@
-import type { SellerStageCommand } from "@partiya/api-contracts";
+import type { OrderEvent, SellerStageCommand } from "@partiya/api-contracts";
 import {
   Alert,
   Box,
@@ -19,7 +19,8 @@ import { useState } from "react";
 import { getApiService, isApiError, SELLER_KEYS, sellerOrderOptions } from "@/shared/api";
 import { formatDateTime, formatIsoDayMonth } from "@/shared/lib/dates";
 import { formatNumber, formatRub } from "@/shared/lib/format";
-import { AppLink, ChatPanel, DocsList } from "@/shared/ui";
+import { useOrderFeed } from "@/shared/lib/use-order-feed";
+import { AppLink, ChatPanel, ConnectionBadge, DocsList } from "@/shared/ui";
 
 import { PhotoReportForm } from "../components/PhotoReportForm";
 import { SellerPipeline } from "../components/SellerPipeline";
@@ -62,12 +63,32 @@ function progressRowsOf(order: {
   return [...base, ...extra];
 }
 
+/** Лента заводу не рисуется — стартовой страницы журнала нет (стабильная ссылка для хука). */
+const NO_EVENTS: OrderEvent[] = [];
+
 const COMMAND_LABEL: Record<SellerStageCommand, string> = {
   start_artwork_review: "Отправить макет технологу",
+  approve_artwork: "Согласовать макет",
   materials_purchased: "Сырьё закуплено — старт производства",
   start_quality_control: "Перевести в «Контроль качества»",
   ship: "Отгрузить партию",
 };
+
+/** Понятный текст ошибки команды завода: известные коды — человеческими словами. */
+function commandErrorText(error: Error): string {
+  if (!isApiError(error)) return error.message;
+  const type = error.problem?.type ?? "";
+  if (type.endsWith("/orders/ship-before-final-payment")) {
+    return "Ждём оплату второго транша: по схеме 50/50 отгрузка — после того, как заказчик оплатит вторую половину.";
+  }
+  if (type.endsWith("/seller/invalid-tracking-number")) {
+    return error.fieldErrors?.trackingNumber?.[0] ?? "Укажите трек-номер: от 1 до 64 символов.";
+  }
+  if (error.status === 409) {
+    return `${error.message} Обновите страницу — заказ мог измениться.`;
+  }
+  return error.message;
+}
 
 export function SellerOrderPage({ orderId }: { orderId: number }) {
   const queryClient = useQueryClient();
@@ -75,8 +96,19 @@ export function SellerOrderPage({ orderId }: { orderId: number }) {
   const [progress, setProgress] = useState<Record<string, string>>({});
   const [declineReason, setDeclineReason] = useState("");
   const [declineOpen, setDeclineOpen] = useState(false);
+  const [deliveredOpen, setDeliveredOpen] = useState(false);
+  const [trackingNumber, setTrackingNumber] = useState("");
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: SELLER_KEYS.all });
+
+  /* Q-331: кабинет завода слушает канал заказа, как кабинет заказчика, — сообщения и
+     смены статуса приходят без перезагрузки. Лента здесь не рисуется: канал нужен ради
+     инвалидаций (заказ, чат). */
+  const feed = useOrderFeed(orderId, NO_EVENTS, {
+    onOrderChanged: () => {
+      void queryClient.invalidateQueries({ queryKey: SELLER_KEYS.all });
+    },
+  });
 
   const confirm = useMutation({
     mutationFn: () => getApiService().confirmSellerOrder(orderId, sellerKey("confirm", orderId)),
@@ -100,6 +132,15 @@ export function SellerOrderPage({ orderId }: { orderId: number }) {
     mutationFn: (input: { stage: string; done: number; total: number }) =>
       getApiService().reportSellerProgress(orderId, input),
     onSuccess: invalidate,
+  });
+  const delivered = useMutation({
+    mutationFn: (value: string) =>
+      getApiService().markSellerOrderDelivered(orderId, { trackingNumber: value }),
+    onSuccess: () => {
+      setDeliveredOpen(false);
+      setTrackingNumber("");
+      return invalidate();
+    },
   });
 
   if (isPending) {
@@ -130,7 +171,21 @@ export function SellerOrderPage({ orderId }: { orderId: number }) {
   }
 
   const money = order.money;
-  const commandError = confirm.error ?? decline.error ?? advance.error ?? report.error;
+  const commandError =
+    confirm.error ?? decline.error ?? advance.error ?? report.error ?? delivered.error;
+  const signoff = order.artworkSignoff;
+  /* 50/50 (п. 4): в «Контроле качества» сервер не даёт `ship`, пока второй транш не
+     оплачен. Состояние транша приходит полем `finalPayment` (Q-383, Q-401); без него
+     (старый бэк) — по-прежнему выводим из отсутствия команды. */
+  const finalPayment = order.finalPayment ?? null;
+  const waitingFinalPayment =
+    order.status === "quality_control" &&
+    !order.disputeOpen &&
+    (finalPayment === null
+      ? !order.availableCommands.includes("ship")
+      : finalPayment.state === "awaiting" ||
+        finalPayment.state === "extended" ||
+        finalPayment.state === "operator");
 
   return (
     <>
@@ -155,6 +210,11 @@ export function SellerOrderPage({ orderId }: { orderId: number }) {
                 </Tag>
               )}
               {order.disputeOpen ? <Tag tone="hot">спор</Tag> : null}
+              <ConnectionBadge
+                state={feed.connection}
+                isCatchingUp={feed.isCatchingUp}
+                onRefresh={feed.refresh}
+              />
             </div>
             <div className="text-muted mt-1 text-[13.5px]">
               {order.customer}
@@ -190,13 +250,121 @@ export function SellerOrderPage({ orderId }: { orderId: number }) {
                 {COMMAND_LABEL[command]}
               </Button>
             ))}
-            {order.availableCommands.length === 0 && !order.canConfirm ? (
+            {order.canMarkDelivered === true ? (
+              <Button
+                variant="cta"
+                aria-expanded={deliveredOpen}
+                onClick={() => setDeliveredOpen((open) => !open)}
+              >
+                Доставлено…
+              </Button>
+            ) : null}
+            {order.availableCommands.length === 0 &&
+            !order.canConfirm &&
+            order.canMarkDelivered !== true ? (
               <p className="text-muted text-[12.5px]">
-                Следующий шаг за заказчиком или платформой.
+                {waitingFinalPayment
+                  ? "Ждём оплату второго транша — отгрузка откроется после неё."
+                  : "Следующий шаг за заказчиком или платформой."}
               </p>
             ) : null}
           </div>
         </div>
+
+        {waitingFinalPayment && finalPayment?.state === "operator" ? (
+          <Alert
+            kind="warn"
+            className="mt-3"
+            title="Второй транш не оплачен — заказ передан оператору платформы"
+            data-testid="final-payment-alert"
+          >
+            Срок оплаты истёк и после автоматического продления. Оператор продлит срок или откроет
+            спор: тогда первый транш в эскроу разделят по правилам спора. Если заказчик оплатит
+            раньше решения — отгрузка откроется.
+          </Alert>
+        ) : waitingFinalPayment ? (
+          <Alert
+            kind="info"
+            className="mt-3"
+            title={
+              finalPayment?.state === "extended" ? finalPayment.note : "Ждём оплату второго транша"
+            }
+            data-testid="final-payment-alert"
+          >
+            Схема 50/50: вторую половину заказчик оплачивает, когда партия готова к отгрузке. Счёт
+            {finalPayment?.invoiceNumber == null ? "" : ` ${finalPayment.invoiceNumber}`} выставлен
+            {finalPayment?.dueAt == null
+              ? ""
+              : ` — срок оплаты до ${formatDateTime(finalPayment.dueAt)}`}
+            . Отгрузить можно сразу после поступления денег в эскроу.
+          </Alert>
+        ) : null}
+
+        {order.status === "artwork_review" && signoff !== undefined ? (
+          <div className="bg-subtle rounded-control mt-3 px-3 py-2.5 text-[13px]">
+            <b className="font-medium">Согласование макета</b> — подписывают обе стороны: технолог —
+            производимость, заказчик — визуал.
+            <ul className="mt-1 grid gap-0.5">
+              <li>
+                Технолог:{" "}
+                {signoff.factoryApprovedAt === null
+                  ? "ждём вашего согласования"
+                  : `согласовано ${formatDateTime(signoff.factoryApprovedAt)}`}
+              </li>
+              <li>
+                Заказчик:{" "}
+                {signoff.customerApprovedAt === null
+                  ? "ждём согласования заказчика"
+                  : `согласовано ${formatDateTime(signoff.customerApprovedAt)}`}
+              </li>
+            </ul>
+          </div>
+        ) : null}
+
+        {deliveredOpen && order.canMarkDelivered === true ? (
+          <form
+            className="border-border mt-3 rounded-[10px] border p-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              delivered.mutate(trackingNumber);
+            }}
+          >
+            <label className="text-muted text-xs" htmlFor="tracking-number">
+              Трек-номер перевозчика — его увидит заказчик; с отметки открывается окно приёмки (5
+              рабочих дней)
+            </label>
+            <Input
+              id="tracking-number"
+              className="mt-1"
+              maxLength={64}
+              value={trackingNumber}
+              invalid={
+                isApiError(delivered.error) &&
+                delivered.error.fieldErrors?.trackingNumber !== undefined
+              }
+              onChange={(event) => setTrackingNumber(event.target.value)}
+              placeholder="CDEK-1234567890"
+            />
+            <div className="mt-2 flex justify-end gap-2">
+              <Button type="button" onClick={() => setDeliveredOpen(false)}>
+                Отмена
+              </Button>
+              <Button
+                type="submit"
+                variant="cta"
+                disabled={delivered.isPending || trackingNumber.trim().length === 0}
+              >
+                {delivered.isPending ? "Отмечаем…" : "Отметить «Доставлено»"}
+              </Button>
+            </div>
+          </form>
+        ) : null}
+
+        {order.trackingNumber != null ? (
+          <p className="mt-2 text-[13px]">
+            Трек-номер: <b className="num">{order.trackingNumber}</b>
+          </p>
+        ) : null}
 
         {order.canConfirm && order.confirmDeadlineAt !== null ? (
           <Alert kind="warn" className="mt-3" title="Подтвердите заказ до дедлайна">
@@ -229,7 +397,9 @@ export function SellerOrderPage({ orderId }: { orderId: number }) {
         ) : null}
 
         {commandError ? (
-          <p className="text-danger mt-2 text-[13px]">{commandError.message}</p>
+          <p role="alert" className="text-danger mt-2 text-[13px]">
+            {commandErrorText(commandError)}
+          </p>
         ) : null}
       </Box>
 
@@ -357,7 +527,8 @@ export function SellerOrderPage({ orderId }: { orderId: number }) {
             <dl className="mt-2 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1.5 text-[13.5px]">
               <dt className="text-muted">В эскроу</dt>
               <dd className="num m-0 text-right">{formatRub(money.escrowAmount)}</dd>
-              <dt className="text-muted">Комиссия {money.feePercent} %</dt>
+              {/* п. 2: комиссия только со стоимости товара, доставка без комиссии */}
+              <dt className="text-muted">Комиссия {money.feePercent} % с товара</dt>
               <dd className="num m-0 text-right">−{formatRub(money.fee)}</dd>
               <dt className="font-medium">К выплате</dt>
               <dd className="num m-0 text-right font-bold">{formatRub(money.payout)}</dd>

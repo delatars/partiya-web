@@ -16,7 +16,7 @@ import { customerStageOf, orderBucketOf } from "@/shared/lib/order-status";
 import { encodeQuoteId } from "@/shared/lib/quote-id";
 import { requireMockOffer } from "@/shared/mocks";
 
-import { PLATFORM_FEE_PERCENT } from "./mock-projections";
+import { platformFeeOf, type TrancheExtensionRecord } from "./mock-projections";
 
 /* История заказчика «Кора» — пять заказов из `mockups/lenta/data.js` целиком, а не
    пятью строками таблицы.
@@ -43,6 +43,21 @@ export interface MockOrder extends Order {
   /** Когда оператор подтвердил выплату заводу; `null` — ещё не выплачено.
       В контракте `Order` этого поля нет: заказчику момент перевода заводу не показывают. */
   payoutAt?: string | null;
+  /** 50/50 (п. 4): срок второго транша. Ставится переходом в «Контроль качества»
+      («готов к отгрузке», Q-342); до этого `null` — счёт ещё не выставлен. */
+  secondTrancheDueAt?: string | null;
+  /** 50/50: когда оператор подтвердил поступление второго транша. */
+  secondTranchePaidAt?: string | null;
+  /** Q-401: сколько раз продлевали срок второго транша (авто + оператор). */
+  secondTrancheExtensions?: number;
+  /** Q-401: повторная просрочка — счёт в очереди оператора «Просроченные транши». */
+  secondTrancheOverdueSince?: string | null;
+  /** Q-401: счёт снят — оператор открыл спор от имени платформы. */
+  secondTrancheCancelledAt?: string | null;
+  /** Q-401: история сроков счёта. */
+  secondTrancheHistory?: TrancheExtensionRecord[];
+  /** Причина отмены заказчиком (п. 17) — уходит только в журнал. */
+  cancelReason?: string | null;
 }
 
 /** Событие журнала до записи: `seq` проставляет хранилище, как и у бэка.
@@ -145,8 +160,10 @@ const SEEDS: SeedInput[] = [
     print: "шелкография, 1 цвет",
   },
   {
+    /* Был заказ свечей «Формата» (2187); категорию «Свечи и декор» убрали (Q-415, Q-431) —
+       тот же заказ «ждёт подтверждения» на текстильном оффере «Камы», суммы — снимок макета. */
     id: 4744,
-    offerId: 2187,
+    offerId: 2085,
     qty: 300,
     status: "awaiting_confirmation",
     submittedDaysAgo: 2,
@@ -158,9 +175,9 @@ const SEEDS: SeedInput[] = [
     unitPrice: rub(210),
     optionIds: [],
     deliveryId: "pickup",
-    colors: [{ color: "белое кашпо", qty: 300 }],
-    print: "тиснение логотипа на кашпо",
-    fit: "200 мл",
+    colors: [{ color: "чёрный", qty: 300 }],
+    print: "DTF-печать, логотип на груди",
+    fit: "оверсайз",
   },
   {
     id: 4601,
@@ -235,7 +252,8 @@ function quoteOf(seed: SeedInput, issuedAtMs: number): Quote {
     ),
     leadDays: 18,
     shipDate: seed.shipDate ?? undefined,
-    validUntil: new Date(issuedAtMs + 30 * 24 * 60 * 60_000).toISOString(),
+    // DECISIONS.md, п. 11: котировка живёт 14 дней
+    validUntil: new Date(issuedAtMs + 14 * 24 * 60 * 60_000).toISOString(),
   };
 }
 
@@ -574,9 +592,10 @@ function seedJournalGeneric(
   builder: JournalBuilder,
   seed: SeedInput,
   factoryName: string,
-  total: Kopecks,
+  quote: Pick<Quote, "total" | "delivery">,
   nowMs: number,
 ): void {
+  const total: Kopecks = quote.total;
   const orderId = seed.id;
   const factory = FACTORY(factoryName);
   const reached = PATH.slice(0, PATH.indexOf(seed.status) + 1);
@@ -658,8 +677,9 @@ function seedJournalGeneric(
       });
     }
     if (status === "completed") {
-      // в ledger уходит сумма ЗА вычетом комиссии платформы — ровно та, что получит завод
-      const fee = Math.floor((total * PLATFORM_FEE_PERCENT) / 100);
+      // в ledger уходит сумма ЗА вычетом комиссии платформы — ровно та, что получит завод;
+      // комиссия только со стоимости товара (п. 2)
+      const fee = platformFeeOf(total, quote.delivery);
       push(builder, {
         type: "money",
         orderId,
@@ -705,7 +725,7 @@ export function seedDemoOrders(
 
     const builder: JournalBuilder = { events: [], seq: 0 };
     if (seed.id === 4812) seedJournal4812(builder, seed, offer.factory.name, nowMs);
-    else seedJournalGeneric(builder, seed, offer.factory.name, quote.total, nowMs);
+    else seedJournalGeneric(builder, seed, offer.factory.name, quote, nowMs);
 
     const deliveryOption = offer.delivery.find((item) => item.id === seed.deliveryId);
     const paidAt = builder.events.find(

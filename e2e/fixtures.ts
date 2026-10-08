@@ -47,7 +47,8 @@ export async function loginAs(page: Page, role: DemoRole): Promise<void> {
 export async function logout(page: Page): Promise<void> {
   await page.goto("/");
   await page.evaluate(() => {
-    window.sessionStorage.removeItem("partiya.mock.auth.v1");
+    // ключ — `STORAGE_KEY` в apps/web/src/modules/auth/api/mock-backend.ts (v2: реквизиты)
+    window.sessionStorage.removeItem("partiya.mock.auth.v2");
   });
 }
 

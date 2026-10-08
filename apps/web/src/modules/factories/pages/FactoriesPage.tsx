@@ -65,7 +65,7 @@ export function FactoriesPage({ search, onChange }: FactoriesPageProps) {
         <Field label="Название завода">
           <Input
             value={search.q ?? ""}
-            placeholder="Волна, Формат…"
+            placeholder="Волна, Кама…"
             onChange={(event) =>
               onChange(withFactoriesPatch(search, { q: event.target.value || undefined }))
             }

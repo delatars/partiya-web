@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { catalogSearchOptions } from "@/shared/api";
-import { OfferCard } from "@/shared/ui";
+import { CATEGORIES } from "@/shared/lib/categories";
+import { CategoryGrid, OfferCard } from "@/shared/ui";
 
-import { CategoryTiles } from "../components/CategoryTiles";
 import { FactoryTiles } from "../components/FactoryTiles";
 import { HeroSection } from "../components/HeroSection";
 import { PromoBand } from "../components/PromoBand";
@@ -23,7 +23,7 @@ export function HomePage() {
       <HeroSection />
 
       <SectionHeader title="Категории" linkLabel="Весь каталог" linkTo="/catalog" />
-      <CategoryTiles />
+      <CategoryGrid categories={CATEGORIES} />
 
       <PromoBand />
 

@@ -31,7 +31,14 @@ export {
 
 export { mockQuote, offerNotFound, requireMockOffer } from "./quote-engine";
 
-export { DEMO_PROMO, FIRST_MOCK_ORDER_NO, FIRST_MOCK_SAMPLE_NO, resolvePromo } from "./orders";
+export {
+  DEMO_PROMO,
+  FIRST_MOCK_ORDER_NO,
+  FIRST_MOCK_SAMPLE_NO,
+  mockPromoCodesEnabled,
+  resolvePromo,
+  setMockPromoCodesEnabled,
+} from "./orders";
 
 export {
   createSellerOfferRecord,

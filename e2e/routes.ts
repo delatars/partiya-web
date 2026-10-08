@@ -20,6 +20,8 @@ export const PUBLIC_ROUTES: readonly RouteCase[] = [
   { path: "/", as: null },
   { path: "/catalog/tekstil/futbolki", as: null, heading: /Футболки/ },
   { path: "/catalog/tekstil", as: null },
+  { path: "/catalog", as: null, heading: /Каталог/ },
+  { path: "/catalog/nasosy", as: null, heading: /Насосы/ },
   { path: "/offer/2231", as: null, heading: /Футболки 180/ },
   { path: "/factory/17", as: null, heading: /Волна/ },
   { path: "/factories", as: null },
@@ -68,6 +70,9 @@ export const OPERATOR_ROUTES: readonly RouteCase[] = [
   { path: "/admin/disputes", as: "Оператор" },
   { path: "/admin/taxonomy", as: "Оператор" },
   { path: "/admin/ranking", as: "Оператор" },
+  { path: "/admin/stuck", as: "Оператор", heading: /Зависшие/ },
+  { path: "/admin/overdue-tranches", as: "Оператор", heading: /Просроченные транши/ },
+  { path: "/admin/delivery", as: "Оператор", heading: /Доставка/ },
 ];
 
 export const ALL_ROUTES: readonly RouteCase[] = [

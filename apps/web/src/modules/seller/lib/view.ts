@@ -11,6 +11,7 @@ export const SELLER_STAGE_TITLE: Record<SellerStage, string> = {
   in_production: "В производстве",
   quality_control: "Контроль качества",
   shipped: "Отгружен",
+  accepted: "Принят заказчиком",
   paid_out: "Выплачено",
 };
 
@@ -19,6 +20,7 @@ export const SELLER_STAGE_TONE: Record<SellerStage, "new" | "work" | "qc" | "don
   in_production: "work",
   quality_control: "qc",
   shipped: "qc",
+  accepted: "done",
   paid_out: "done",
 };
 
@@ -28,6 +30,7 @@ export const SELLER_STAGE_ORDER: readonly SellerStage[] = [
   "in_production",
   "quality_control",
   "shipped",
+  "accepted",
   "paid_out",
 ];
 

@@ -15,6 +15,22 @@ export const DEMO_PROMO: QuotePromo & { title: string } = {
   title: "Первая партия на платформе",
 };
 
+/* DECISIONS.md, п. 10: промокоды выключены фиче-флагом (`PROMO_CODES_ENABLED=false` у бэка,
+   Q-343). Мок по умолчанию ведёт себя как выключенный бэк: непустой код → 422
+   `quote/unknown_promo` «промокоды сейчас не принимаются». Справочник и расчёт не удалены —
+   включаются флагом (тесты проверяют обе ветки). */
+let promoCodesEnabled = false;
+
+/** Включены ли промокоды в моках. */
+export function mockPromoCodesEnabled(): boolean {
+  return promoCodesEnabled;
+}
+
+/** Только тесты и дев-инструменты: переключить флаг промокодов мока. */
+export function setMockPromoCodesEnabled(enabled: boolean): void {
+  promoCodesEnabled = enabled;
+}
+
 /** Проверка кода без учёта регистра и пробелов по краям — как её сделает сервер. */
 export function resolvePromo(code: string): (QuotePromo & { title: string }) | undefined {
   const normalized = code.trim().toUpperCase();

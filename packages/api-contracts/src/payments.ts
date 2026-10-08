@@ -1,5 +1,5 @@
 import type { Kopecks } from "./common";
-import type { PaymentMethod } from "./orders";
+import type { PaymentInstructions, PaymentMethod } from "./orders";
 
 /* Домен «Деньги» — крейты `payments` и ledger (ARCHITECTURE.md, 5.4):
 
@@ -72,6 +72,45 @@ export interface EscrowDeal {
   autoReleaseAt: string | null;
   /** Спор, из-за которого выплата заблокирована. */
   blockedByDisputeId?: string | null;
+  /** Второй транш 50/50: состояние, счёт и реквизиты (Q-384, Q-401). `null` — оплата
+      одним платежом. */
+  finalPayment?: FinalPayment | null;
+}
+
+/** Состояние второго транша 50/50 (Q-401, вариант «в»). */
+export type FinalPaymentState =
+  /** Ещё не выставлен: партия не дошла до контроля качества. */
+  | "not_issued"
+  /** Выставлен, ждём оплату. */
+  | "awaiting"
+  /** Первая просрочка — срок продлён системой на 48 ч (или оператором вручную). */
+  | "extended"
+  /** Просрочен повторно — заказ у оператора платформы. */
+  | "operator"
+  /** Оплачен — отгрузка разрешена. */
+  | "paid"
+  /** Снят: заказ отменён или оператор открыл спор от имени платформы. */
+  | "cancelled";
+
+/** Второй транш 50/50 — карточка эскроу заказчика (`EscrowDeal.finalPayment`) и кабинет
+    завода (`SellerOrder.finalPayment`, без реквизитов). */
+export interface FinalPayment {
+  state: FinalPaymentState;
+  /** Номер счёта строкой как есть («4813-2-СЧ»): при продлении не меняется (Q-420).
+      `null` — счёт ещё не выставлен. */
+  invoiceNumber: string | null;
+  amount: Kopecks;
+  /** Текущий срок оплаты (после продлений — новый). */
+  dueAt: string | null;
+  /** Сколько раз продлевали срок. */
+  extensions: number;
+  /** Когда счёт ушёл к оператору. */
+  overdueSince: string | null;
+  paidAt: string | null;
+  /** Реквизиты и назначение платежа — только заказчику и пока счёт ждёт оплаты. */
+  instructions: PaymentInstructions | null;
+  /** Готовая строка состояния — её пишет сервер. */
+  note: string;
 }
 
 /** Сводка для карточки заказа: «Эскроу · 183 400 ₽ · зарезервировано платформой».

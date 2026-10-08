@@ -19,12 +19,12 @@ function header(o = {}) {
   return `<header class="top"><div class="wrap">
     <a class="logo" href="#home"><i></i>${D.brand.name}</a>
     <a class="catbtn" href="#catalog">☰ <span>Каталог</span></a>
-    <div class="search"><input id="q" value="${o.q || ''}" placeholder="Что произвести? футболки, худи, свечи, БАДы, металлокаркас…"><select id="qc"><option>Все категории</option>${D.categories.map(c => `<option>${c}</option>`).join('')}</select><button>Найти</button></div>
+    <div class="search"><input id="q" value="${o.q || ''}" placeholder="Что произвести? футболки, худи, шоперы, металлокаркас…"><select id="qc"><option>Все категории</option>${D.categories.map(c => `<option>${c}</option>`).join('')}</select><button>Найти</button></div>
     <div class="icons">${o.guest
       ? `<a href="#compare"><i></i>Сравнение</a><a href="#login"><i></i>Войти</a>`
       : `<a href="#compare"><i></i>Сравнение<span class="b">2</span></a><a href="#favorites"><i></i>Избранное</a><a href="#customer"><i></i>Заказы<span class="b">3</span></a><a href="#notifications"><i></i>Уведомления<span class="b">4</span></a><a href="#company"><i></i>Кабинет</a>`}</div>
   </div></header>
-  <div class="menu"><div class="wrap">${D.categories.map((c, i) => `<a class="${i === 0 && !o.noCat ? 'on' : ''}" href="#catalog">${c}</a>`).join('')}<a href="#factory-page">Заводы</a><a class="promo" href="#catalog">Свободная мощность −15 %</a><a href="#how">Как это работает</a><a href="#for-factories">Заводам</a></div></div>`;
+  <div class="menu"><div class="wrap">${D.categories.slice(0, D.menuCategories).map((c, i) => `<a class="${i === 0 && !o.noCat ? 'on' : ''}" href="#catalog">${c}</a>`).join('')}<a href="#factory-page">Заводы</a><a class="promo" href="#catalog">Свободная мощность −15 %</a><a href="#how">Как это работает</a><a href="#for-factories">Заводам</a></div></div>`;
 }
 function headerSlim(right = '') {
   return `<header class="top slim"><div class="wrap"><a class="logo" href="#home"><i></i>${D.brand.name}</a><span class="sp"></span>${right}</div></header>`;

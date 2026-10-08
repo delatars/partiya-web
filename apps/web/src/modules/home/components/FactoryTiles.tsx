@@ -8,7 +8,14 @@ import { AppLink } from "@/shared/ui";
 
 const FACTORIES = [
   { id: 17, name: "Волна", city: "Иваново", rating: 4.8, orders: 87, about: "швейное · с 2014" },
-  { id: 24, name: "Формат", city: "Тула", rating: 4.9, orders: 143, about: "свечи, гипс · с 2017" },
+  {
+    id: 52,
+    name: "Невская нить",
+    city: "Санкт-Петербург",
+    rating: 4.7,
+    orders: 52,
+    about: "швейное · с 2015",
+  },
   {
     id: 29,
     name: "Пошив37",

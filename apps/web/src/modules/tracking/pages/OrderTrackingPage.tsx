@@ -1,4 +1,4 @@
-import type { Order } from "@partiya/api-contracts";
+import type { ArtworkSignoff, Order } from "@partiya/api-contracts";
 import {
   Alert,
   Box,
@@ -8,6 +8,7 @@ import {
   Button,
   Skeleton,
   Tag,
+  Textarea,
 } from "@partiya/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
@@ -16,8 +17,10 @@ import {
   getApiService,
   isApiError,
   ORDER_KEYS,
+  orderEscrowOptions,
   orderEventsOptions,
   orderOptions,
+  PAYMENT_KEYS,
 } from "@/shared/api";
 import { formatDateTime, formatIsoDayMonth, workingDaysLeft } from "@/shared/lib/dates";
 import { formatRub } from "@/shared/lib/format";
@@ -62,6 +65,8 @@ export function OrderTrackingPage({ orderId, demoPanel }: OrderTrackingPageProps
   const [openPhoto, setOpenPhoto] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | undefined>(undefined);
   const [pending, setPending] = useState<OrderActionKind | undefined>(undefined);
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
 
   const orderQuery = useQuery(orderOptions(orderId));
   const eventsQuery = useQuery({
@@ -70,7 +75,16 @@ export function OrderTrackingPage({ orderId, demoPanel }: OrderTrackingPageProps
     enabled: orderQuery.data?.paidAt != null,
   });
 
-  const feed = useOrderFeed(orderId, eventsQuery.data?.items ?? []);
+  const feed = useOrderFeed(orderId, eventsQuery.data?.items ?? [], {
+    onOrderChanged: () => {
+      void queryClient.invalidateQueries({ queryKey: PAYMENT_KEYS.deal(orderId) });
+    },
+  });
+  // 50/50 (п. 4): транши — отдельным запросом сделки, только у схемы из двух платежей
+  const escrowDeal = useQuery({
+    ...orderEscrowOptions(orderId),
+    enabled: orderQuery.data?.escrow?.method === "escrow_split_50_50",
+  });
 
   const approve = useMutation({
     mutationFn: () => getApiService().approveArtwork(orderId),
@@ -103,6 +117,38 @@ export function OrderTrackingPage({ orderId, demoPanel }: OrderTrackingPageProps
     },
     onError: (error) => {
       setActionError(isApiError(error) ? error.message : "Не получилось повторить партию");
+    },
+    onSettled: () => {
+      setPending(undefined);
+    },
+  });
+
+  const cancel = useMutation({
+    mutationFn: () =>
+      getApiService().cancelOrder(orderId, {
+        reason: cancelReason.trim().length > 0 ? cancelReason.trim() : null,
+      }),
+    onMutate: () => {
+      setPending("cancel");
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(ORDER_KEYS.detail(orderId), updated);
+      void queryClient.invalidateQueries({ queryKey: ORDER_KEYS.lists() });
+      setCancelOpen(false);
+      setCancelReason("");
+      setActionError(undefined);
+    },
+    onError: (error) => {
+      setCancelOpen(false);
+      // п. 17: после оплаты — только через оператора; статус мог смениться, перечитываем
+      if (isApiError(error) && error.problem?.type?.endsWith("/orders/cancel-after-payment")) {
+        setActionError(
+          "Деньги уже поступили в эскроу — отменить заказ можно только через оператора платформы. Напишите в чат заказа.",
+        );
+        void queryClient.invalidateQueries({ queryKey: ORDER_KEYS.detail(orderId) });
+        return;
+      }
+      setActionError(isApiError(error) ? error.message : "Не получилось отменить заказ");
     },
     onSettled: () => {
       setPending(undefined);
@@ -181,14 +227,75 @@ export function OrderTrackingPage({ orderId, demoPanel }: OrderTrackingPageProps
           onRepeat={() => {
             repeat.mutate();
           }}
+          onCancel={() => {
+            setActionError(undefined);
+            setCancelOpen(true);
+          }}
         />
       </div>
+
+      {cancelOpen && order.canCancel === true && (
+        <Box className="mb-3">
+          <h2 className="font-heading text-base font-bold">Отменить заказ № {order.id}?</h2>
+          <p className="text-muted mt-1 text-[13px]">
+            Счёт будет снят, мощность фабрики освободится. Отменить можно только до оплаты — после
+            поступления денег отмена идёт через оператора платформы.
+          </p>
+          <label className="text-muted mt-2.5 block text-xs" htmlFor="cancel-reason">
+            Причина — необязательно, попадёт в журнал заказа
+          </label>
+          <Textarea
+            id="cancel-reason"
+            rows={2}
+            className="mt-1"
+            maxLength={500}
+            value={cancelReason}
+            onChange={(event) => {
+              setCancelReason(event.target.value);
+            }}
+            placeholder="Например: изменился бюджет"
+          />
+          <div className="mt-2 flex flex-wrap justify-end gap-2">
+            <Button
+              onClick={() => {
+                setCancelOpen(false);
+              }}
+            >
+              Не отменять
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={cancel.isPending}
+              onClick={() => {
+                cancel.mutate();
+              }}
+            >
+              {cancel.isPending ? "Отменяем…" : "Да, отменить заказ"}
+            </Button>
+          </div>
+        </Box>
+      )}
 
       {actionError !== undefined && (
         <Alert kind="danger" className="mb-3" title="Действие не выполнено">
           {actionError}
         </Alert>
       )}
+
+      {order.status === "artwork_review" && order.artworkSignoff !== undefined && (
+        <Alert kind="info" className="mb-3" title="Согласование макета">
+          {artworkSignoffNote(order.artworkSignoff)}
+        </Alert>
+      )}
+
+      {order.trackingNumber != null &&
+        (order.status === "acceptance" ||
+          order.status === "dispute" ||
+          order.status === "completed") && (
+          <p className="mb-3 text-[13.5px]">
+            Доставка: трек-номер <b className="num">{order.trackingNumber}</b>
+          </p>
+        )}
 
       {order.acceptance && (
         <Alert
@@ -284,7 +391,13 @@ export function OrderTrackingPage({ orderId, demoPanel }: OrderTrackingPageProps
             <h3 className="font-heading text-base font-bold">Документы</h3>
             <DocsList documents={order.documents} />
           </Box>
-          {order.escrow && <EscrowCard escrow={order.escrow} />}
+          {order.escrow && (
+            <EscrowCard
+              escrow={order.escrow}
+              tranches={escrowDeal.data?.tranches}
+              finalPayment={escrowDeal.data?.finalPayment}
+            />
+          )}
         </div>
       </div>
 
@@ -300,6 +413,20 @@ export function OrderTrackingPage({ orderId, demoPanel }: OrderTrackingPageProps
 }
 
 /** «(через 12 раб. дней)» — сколько осталось до плановой отгрузки. */
+/** п. 16: макет подписывают обе стороны — технолог (производимость) и заказчик (визуал). */
+function artworkSignoffNote(signoff: ArtworkSignoff): string {
+  const customer = signoff.customerApprovedAt !== null;
+  const factory = signoff.factoryApprovedAt !== null;
+  if (customer && factory) return "Макет согласован обеими сторонами — фабрика закупает сырьё.";
+  if (customer) {
+    return "Вы согласовали макет. Ждём согласования технолога фабрики — он проверяет производимость.";
+  }
+  if (factory) {
+    return "Технолог фабрики согласовал макет. Ждём вашего согласования — проверьте визуал и цветопробу.";
+  }
+  return "Макет у технолога. Нужны обе подписи: ваша (визуал) и технолога (производимость).";
+}
+
 function shipNote(order: Order): string {
   if (order.shipDate === null) return "";
   const left = workingDaysLeft(`${order.shipDate}T18:00:00`);

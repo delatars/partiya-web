@@ -2,6 +2,7 @@ import type { OfferBadge, PriceTier } from "./catalog";
 import type { Kopecks } from "./common";
 import type { OptionPriceUnit } from "./offers";
 import type {
+  ArtworkSignoff,
   ArtworkUploadRequest,
   ArtworkUploadResponse,
   OrderDelivery,
@@ -9,6 +10,7 @@ import type {
   OrderParams,
   OrderStatus,
 } from "./orders";
+import type { FinalPayment } from "./payments";
 import type { OrderStageProgress } from "./tracking";
 
 /* Домен «Кабинет завода» — крейты `orders` (срез завода), `offers`, `samples`,
@@ -44,8 +46,13 @@ import type { OrderStageProgress } from "./tracking";
  * и для `shipped`/`acceptance` ячейки нет. Допущение фронта: добавлена пятая ступень
  * `shipped` («Отгружен») — иначе отгруженный заказ исчезает из всех вкладок, а завод
  * не видит, что партия ждёт приёмки. Спор ступени не меняет: он показывается бейджем
- * поверх `shipped` (`SellerOrderListItem.disputeOpen`). */
-export type SellerStage = "new" | "in_production" | "quality_control" | "shipped" | "paid_out";
+ * поверх `shipped` (`SellerOrderListItem.disputeOpen`).
+ *
+ * DECISIONS.md, п. 15 / Q-335: шестая ступень `accepted` («Принят заказчиком») —
+ * приёмка состоялась, выплата оператором ещё не проведена; `paid_out` — деньги ушли
+ * заводу. Обе — статус `completed`, различает их отметка выплаты на сервере. */
+export type SellerStage =
+  "new" | "in_production" | "quality_control" | "shipped" | "accepted" | "paid_out";
 
 /** Строка очереди заказов завода. */
 export interface SellerOrderListItem {
@@ -90,6 +97,8 @@ export interface SellerOrderSummary {
   inProduction: number;
   qualityControl: number;
   shipped: number;
+  /** Q-335: приняты заказчиком, выплата ещё не проведена. */
+  accepted?: number;
   paidOut: number;
   /** Сколько заказов ждут подтверждения прямо сейчас. */
   awaitingConfirmation: number;
@@ -166,18 +175,44 @@ export interface SellerOrder {
   /** Можно ли подтвердить или отклонить заказ. */
   canConfirm: boolean;
   canDecline: boolean;
+  /** Можно отметить «Доставлено» по трек-номеру (`POST /seller/orders/{id}/delivered`,
+      DECISIONS.md, п. 13): партия отгружена и спора нет. */
+  canMarkDelivered?: boolean;
+  /** Трек-номер, введённый при отметке доставки; `null` — ещё не отмечена. */
+  trackingNumber?: string | null;
+  /** Подписи сторон под макетом (п. 16). */
+  artworkSignoff?: ArtworkSignoff;
   /** Когда завод последний раз вносил прогресс; `null` — ни разу. */
   progressUpdatedAt: string | null;
   unreadMessages: number;
   disputeOpen: boolean;
   createdAt: string;
   updatedAt: string;
+  /** Второй транш 50/50 на контроле качества: «ждём оплату до …», «срок продлён»,
+      «передано оператору», «оплачен» (Q-383, Q-401). Реквизитов нет. `null` — схема
+      «сразу» или до контроля качества. */
+  finalPayment?: FinalPayment | null;
 }
 
 /** Команды автомата, которые подаёт завод (ARCHITECTURE.md, 5.2; бэк уже реализовал
     `POST /seller/orders/{id}/stage`). */
 export type SellerStageCommand =
-  "start_artwork_review" | "materials_purchased" | "start_quality_control" | "ship";
+  | "start_artwork_review"
+  /** Подпись технолога под макетом — производимость (DECISIONS.md, п. 16). Заказ уходит
+      в `materials`, когда подписал и заказчик (`POST /orders/{id}/artwork/approve`). */
+  | "approve_artwork"
+  | "materials_purchased"
+  | "start_quality_control"
+  | "ship";
+
+/** `POST /seller/orders/{id}/delivered` — завод отмечает доставку по трек-номеру
+ * (DECISIONS.md, п. 13). `shipped → acceptance`, открывается окно приёмки; деньги
+ * раскрывает только приёмка заказчика. Ответ — `SellerOrder`. Кнопка оператора
+ * `POST /admin/orders/{id}/delivered` остаётся запасным путём. */
+export interface MarkDeliveredBody {
+  /** Трек-номер перевозчика, 1–64 символа. */
+  trackingNumber: string;
+}
 
 /** `POST /seller/orders/{id}/decline`. Причина уходит в журнал заказа и заказчику. */
 export interface DeclineOrderBody {
@@ -748,6 +783,8 @@ export type SellerProblemType =
   | "https://partiya.ru/problems/seller/confirm-deadline-passed"
   /** 422 · прогресс больше объёма партии или отрицателен. */
   | "https://partiya.ru/problems/seller/invalid-progress"
+  /** 422 · трек-номер пуст или длиннее 64 символов (`errors.trackingNumber`), п. 13. */
+  | "https://partiya.ru/problems/seller/invalid-tracking-number"
   /** 422 · предложение не проходит валидацию ступеней (`errors` по полям). */
   | "https://partiya.ru/problems/seller/invalid-offer"
   /** 409 · предложение уже на модерации: второй раз отправить нельзя. */

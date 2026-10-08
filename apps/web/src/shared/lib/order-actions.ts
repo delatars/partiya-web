@@ -25,7 +25,9 @@ export type OrderActionKind =
   /** Смотреть открытый спор. */
   | "view_dispute"
   /** Повторить партию со скидкой. */
-  | "repeat";
+  | "repeat"
+  /** Отменить заказ до оплаты (п. 17, `canCancel` с сервера). */
+  | "cancel";
 
 /** Что нужно знать о заказе, чтобы решить. Не весь `Order` — так функция проверяется
     тестом на голых данных, без сборки фикстуры заказа целиком. */
@@ -35,10 +37,20 @@ export interface OrderActionContext {
   disputeOpen?: boolean;
   /** Окно приёмки ещё идёт: после `autoAcceptAt` сервер примет партию сам. */
   acceptanceOpen?: boolean;
+  /** Сервер разрешает отменить заказ самому (`Order.canCancel`, п. 17). */
+  canCancel?: boolean;
+  /** Заказчик уже подписал макет (`artworkSignoff.customerApprovedAt`, п. 16). */
+  artworkSignedByCustomer?: boolean;
 }
 
 /** Доступные действия в порядке важности: первое — главное на экране. */
 export function orderActions(context: OrderActionContext): OrderActionKind[] {
+  const actions = statusActions(context);
+  // отмена — всегда последняя и никогда не главная: её решает сервер, а не статус
+  return context.canCancel === true ? [...actions, "cancel"] : actions;
+}
+
+function statusActions(context: OrderActionContext): OrderActionKind[] {
   const { status } = context;
   const disputeOpen = context.disputeOpen === true;
 
@@ -53,7 +65,10 @@ export function orderActions(context: OrderActionContext): OrderActionKind[] {
     case "confirmed":
       return ["message"];
     case "artwork_review":
-      return ["approve_artwork", "message"];
+      // своя подпись уже стоит — ждём технолога, повторно подписывать нечего
+      return context.artworkSignedByCustomer === true
+        ? ["message"]
+        : ["approve_artwork", "message"];
     case "materials":
       return ["message"];
     // спор из производства разрешён автоматом: партия ещё не доехала, но брак уже виден
@@ -87,6 +102,8 @@ export function orderActionsOf(order: Order, now: number = Date.now()): OrderAct
     disputeOpen:
       dispute !== null && dispute.status !== "resolved" && dispute.status !== "withdrawn",
     acceptanceOpen: acceptance === null ? undefined : Date.parse(acceptance.autoAcceptAt) > now,
+    canCancel: order.canCancel === true,
+    artworkSignedByCustomer: (order.artworkSignoff?.customerApprovedAt ?? null) !== null,
   });
 }
 
@@ -100,6 +117,7 @@ export const ORDER_ACTION_TITLES: Record<OrderActionKind, string> = {
   dispute: "Открыть спор",
   view_dispute: "Перейти к спору",
   repeat: "Повторить партию",
+  cancel: "Отменить заказ",
 };
 
 /** Главное действие рисуется `cta`, остальные — обычными кнопками. */

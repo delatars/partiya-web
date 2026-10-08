@@ -72,8 +72,12 @@ export class HttpClient {
 
 async function toApiError(response: Response, correlationId: string): Promise<ApiError> {
   const problem = await readProblem(response);
-  const message =
-    problem?.detail ?? problem?.title ?? `Запрос не выполнен (${String(response.status)})`;
+  // 413 от лимита тела приходит `text/plain`, без problem+json — различаем по статусу
+  const fallback =
+    response.status === 413
+      ? "Файл слишком большой — не больше 25 МБ"
+      : `Запрос не выполнен (${String(response.status)})`;
+  const message = problem?.detail ?? problem?.title ?? fallback;
   return new ApiError({
     status: response.status,
     message,

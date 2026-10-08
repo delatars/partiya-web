@@ -14,12 +14,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
 import { ADMIN_KEYS, adminRankingOptions, getApiService, isApiError } from "@/shared/api";
+import { promoCodesEnabled } from "@/shared/lib/features";
 import { formatNumber } from "@/shared/lib/format";
 
 /* Макет: экран `admin-ranking` — веса формулы «Популярные», штрафы, бейджи, промокоды.
 
    Сумма весов обязана быть 100: формулу нужно уметь объяснить заводу («почему я на
-   третьем месте»). Проверку делает и сервер — 422, если сумма другая. */
+   третьем месте»). Проверку делает и сервер — 422, если сумма другая.
+
+   Q-363: применяется только полный набор весов; ошибки сервера раскладываются по полям
+   (`weights.<key>` — под весом, `weights` — у суммы). Промокоды выключены (п. 10) —
+   таблица остаётся справочной. */
 
 export function AdminRankingPage() {
   const queryClient = useQueryClient();
@@ -32,27 +37,29 @@ export function AdminRankingPage() {
     setWeights(Object.fromEntries(data.weights.map((item) => [item.key, String(item.weight)])));
   }, [data]);
 
+  /* Q-363: PUT принимает ПОЛНЫЙ набор — каждый фактор ровно раз. Набор строится по
+     списку факторов с сервера, а не по тому, что успели ввести: иначе нетронутый
+     фактор выпал бы из тела и сервер ответил 422 `admin/weights-invalid`. */
+  const fullSet = () =>
+    (data?.weights ?? []).map((item) => {
+      const raw = (weights[item.key] ?? String(item.weight)).trim().replace(",", ".");
+      const value = Number(raw);
+      return { key: item.key, weight: raw.length === 0 || Number.isNaN(value) ? -1 : value };
+    });
+
   const apply = useMutation({
-    mutationFn: () =>
-      getApiService().updateAdminRanking({
-        weights: Object.entries(weights).map(([key, value]) => ({
-          key,
-          weight: Number(value) || 0,
-        })),
-      }),
+    mutationFn: () => getApiService().updateAdminRanking({ weights: fullSet() }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.ranking() }),
   });
 
   const runPreview = useMutation({
-    mutationFn: () =>
-      getApiService().previewAdminRanking({
-        weights: Object.entries(weights).map(([key, value]) => ({
-          key,
-          weight: Number(value) || 0,
-        })),
-      }),
+    mutationFn: () => getApiService().previewAdminRanking({ weights: fullSet() }),
     onSuccess: setPreview,
   });
+
+  // ошибки сервера по полям: `weights.<key>` — под весом, `weights` — у суммы
+  const fieldErrors = isApiError(apply.error) ? (apply.error.fieldErrors ?? {}) : {};
+  const sumError = fieldErrors.weights?.[0];
 
   if (isPending || !data) {
     return (
@@ -80,31 +87,47 @@ export function AdminRankingPage() {
               сумма {sum} из 100
             </span>
           </div>
+          {sumError === undefined ? null : (
+            <p role="alert" className="text-danger mt-1 text-xs">
+              {sumError}
+            </p>
+          )}
           <div className="mt-2 grid gap-1.5">
-            {data.weights.map((weight) => (
-              <div
-                key={weight.key}
-                className="grid grid-cols-[1fr_auto] items-center gap-x-2.5 gap-y-1 text-[13px] sm:grid-cols-[minmax(9rem,1fr)_2fr_auto]"
-              >
-                <span>{weight.title}</span>
-                <ProgressBar
-                  className="order-last col-span-2 sm:order-none sm:col-span-1"
-                  label={weight.title}
-                  value={Number(weights[weight.key] ?? 0)}
-                />
-                <Input
-                  size="sm"
-                  numeric
-                  inputMode="numeric"
-                  className="w-16"
-                  aria-label={`Вес: ${weight.title}`}
-                  value={weights[weight.key] ?? ""}
-                  onChange={(event) => {
-                    setWeights((current) => ({ ...current, [weight.key]: event.target.value }));
-                  }}
-                />
-              </div>
-            ))}
+            {data.weights.map((weight) => {
+              const error = fieldErrors[`weights.${weight.key}`]?.[0];
+              const errorId = `weight-error-${weight.key}`;
+              return (
+                <div
+                  key={weight.key}
+                  className="grid grid-cols-[1fr_auto] items-center gap-x-2.5 gap-y-1 text-[13px] sm:grid-cols-[minmax(9rem,1fr)_2fr_auto]"
+                >
+                  <span>{weight.title}</span>
+                  <ProgressBar
+                    className="order-last col-span-2 sm:order-none sm:col-span-1"
+                    label={weight.title}
+                    value={Number(weights[weight.key] ?? 0)}
+                  />
+                  <Input
+                    size="sm"
+                    numeric
+                    inputMode="numeric"
+                    className="w-16"
+                    aria-label={`Вес: ${weight.title}`}
+                    invalid={error !== undefined}
+                    aria-describedby={error === undefined ? undefined : errorId}
+                    value={weights[weight.key] ?? ""}
+                    onChange={(event) => {
+                      setWeights((current) => ({ ...current, [weight.key]: event.target.value }));
+                    }}
+                  />
+                  {error === undefined ? null : (
+                    <span id={errorId} className="text-danger col-span-full text-xs">
+                      {error}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           <h4 className="mt-4 text-[13px] font-bold">Штрафы</h4>
@@ -127,7 +150,13 @@ export function AdminRankingPage() {
           </div>
           {apply.error ? (
             <Alert kind="danger" className="mt-2" title="Веса не применены">
-              {isApiError(apply.error) ? apply.error.message : "Ошибка"}
+              {!isApiError(apply.error)
+                ? "Ошибка"
+                : apply.error.problem?.type?.endsWith("/admin/weights-sum") === true
+                  ? "Сумма весов обязана быть ровно 100 %."
+                  : apply.error.problem?.type?.endsWith("/admin/weights-invalid") === true
+                    ? "Проверьте отмеченные веса: каждый — целое от 0 до 100."
+                    : apply.error.message}
             </Alert>
           ) : null}
           {data.appliedAt === null ? null : (
@@ -156,7 +185,9 @@ export function AdminRankingPage() {
 
           <Box className="mt-3">
             <div className="flex items-center justify-between">
-              <h3 className="font-heading text-base font-bold">Промокоды</h3>
+              <h3 className="font-heading text-base font-bold">
+                Промокоды {promoCodesEnabled() ? null : <Tag tone="done">выключены</Tag>}
+              </h3>
               <Button size="sm" disabled>
                 + Промокод
               </Button>

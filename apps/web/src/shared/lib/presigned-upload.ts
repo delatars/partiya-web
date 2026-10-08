@@ -46,7 +46,14 @@ export function uploadArtwork(
         resolve();
         return;
       }
-      reject(new Error(`Хранилище отказало (${String(xhr.status)})`));
+      // 413 приходит `text/plain` (лимит тела у приёмника, не problem+json) — по статусу
+      reject(
+        new Error(
+          xhr.status === 413
+            ? "Файл больше 25 МБ — хранилище его не приняло. Сожмите файл или пришлите ссылку технологу"
+            : `Хранилище отказало (${String(xhr.status)})`,
+        ),
+      );
     });
     xhr.addEventListener("error", () => {
       reject(new Error("Файл не загрузился — проверьте связь"));

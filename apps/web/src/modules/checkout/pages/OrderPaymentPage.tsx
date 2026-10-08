@@ -236,7 +236,8 @@ function InvoiceCard({
           <b className="price num text-xl">{formatRub(payment.amountDue)}</b>
           {payment.amountDue !== payment.amount && (
             <span className="text-muted ml-1.5 text-[12.5px]">
-              первый транш из {formatRub(payment.amount)}
+              первый транш из {formatRub(payment.amount)} · половина — когда партия готова к
+              отгрузке
             </span>
           )}
         </dd>

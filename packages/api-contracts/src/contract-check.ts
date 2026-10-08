@@ -198,6 +198,10 @@ export type ListSessions = Response<C.AuthSessionList, Res<"listSessions">>;
 
 export type CreateOrg = Request<Req<"createOrg">, C.CreateOrgBody>;
 export type CreateOrgRes = Response<C.Organization, Res<"createOrg", 201>>;
+/* п. 24: реквизиты организации — экран «Компания». */
+export type GetOrgRequisites = Response<C.OrgRequisites, Res<"getOrgRequisites">>;
+export type UpdateOrgRequisites = Request<Req<"updateOrgRequisites">, C.UpdateOrgRequisitesBody>;
+export type UpdateOrgRequisitesRes = Response<C.OrgRequisites, Res<"updateOrgRequisites">>;
 
 /* ══════════════════════════════════════════════════════════════════════════
    catalog · каталог, карточка, заводы  (http/catalog.ts, offers.ts, factories.ts)
@@ -243,6 +247,11 @@ export type RequestArtworkUploadRes = Response<
 export type CompleteArtworkUpload = Response<C.OrderArtwork, Res<"completeArtworkUpload">>;
 
 export type SubmitOrder = Response<C.SubmitOrderResponse, Res<"submitOrder">>;
+/* п. 12: принятие оферты в теле `submit`. */
+export type SubmitOrderBody = Request<Req<"submitOrder">, C.SubmitOrderBody>;
+/* п. 17: отмена заказчиком до оплаты. */
+export type CancelOrder = Request<Req<"cancelOrder">, C.CancelOrderBody>;
+export type CancelOrderRes = Response<C.Order, Res<"cancelOrder">>;
 export type ApproveArtwork = Response<C.Order, Res<"approveArtwork">>;
 
 /** ИСКЛЮЧЕНИЕ · `#[schema(value_type = Object)]` на бэке: `marks` и `review` в теле приёмки описаны свободным объектом. По проводу
@@ -386,6 +395,12 @@ export type ReportSellerProgress = Request<Req<"reportSellerProgress">, C.Report
 export type ReportSellerProgressRes = Response<C.SellerOrder, Res<"reportSellerProgress">>;
 export type AdvanceSellerStage = Request<Req<"advanceSellerStage">, C.AdvanceStageBody>;
 export type AdvanceSellerStageRes = Response<C.SellerOrder, Res<"advanceSellerStage">>;
+/* п. 13: «Доставлено» заводом по трек-номеру. */
+export type MarkSellerOrderDelivered = Request<
+  Req<"markSellerOrderDelivered">,
+  C.MarkDeliveredBody
+>;
+export type MarkSellerOrderDeliveredRes = Response<C.SellerOrder, Res<"markSellerOrderDelivered">>;
 export type RequestPhotoUpload = Request<Req<"requestPhotoUpload">, C.PhotoReportUploadRequest>;
 export type RequestPhotoUploadRes = Response<
   C.PhotoReportUploadResponse,
@@ -510,3 +525,48 @@ export type AdminUpdateRanking = Request<Req<"adminUpdateRanking">, C.UpdateRank
 export type AdminUpdateRankingRes = Known<C.AdminRanking, Res<"adminUpdateRanking">>;
 export type AdminRankingPreview = Request<Req<"adminRankingPreview">, C.RankingPreviewBody>;
 export type AdminRankingPreviewRes = Response<C.RankingPreview, Res<"adminRankingPreview">>;
+/* п. 13, Q-332: «Доставлено» оператора — запасной путь. */
+export type MarkOrderDeliveredRes = Response<C.Order, Res<"markOrderDelivered">>;
+/* п. 35: «Зависшие». */
+export type AdminListStuck = Response<C.AdminStuckPage, Res<"adminListStuck">>;
+export type AdminStuckCount = Response<C.AdminStuckCount, Res<"adminStuckCount">>;
+/** ИСКЛЮЧЕНИЕ · `actions[].action` у бэка — `String` (имя записи аудит-лога), фронт сужает до
+    `"stuck.retry" | "stuck.resolve"`. Экран неизвестное значение показывает как «Решено»
+    и не падает; остальные поля карточки сходятся (Q-386). */
+export type AdminStuckCard = Known<C.AdminStuckCard, Res<"adminStuckCard">>;
+export type AdminStuckRetry = Request<Req<"adminStuckRetry">, C.AdminStuckActionBody>;
+/** ИСКЛЮЧЕНИЕ · то же, что у `AdminStuckCard`: `actions[].action` — строка. */
+export type AdminStuckRetryRes = Known<C.AdminStuckCard, Res<"adminStuckRetry">>;
+export type AdminStuckResolve = Request<Req<"adminStuckResolve">, C.AdminStuckActionBody>;
+/** ИСКЛЮЧЕНИЕ · то же, что у `AdminStuckCard`: `actions[].action` — строка. */
+export type AdminStuckResolveRes = Known<C.AdminStuckCard, Res<"adminStuckResolve">>;
+/* Остальное в карточке — сверка без `actions`: строка, payload, флаги кнопок. */
+export type AdminStuckCardFields = Response<
+  Omit<C.AdminStuckCard, "actions">,
+  Omit<Res<"adminStuckCard">, "actions">
+>;
+/* Q-401: «Просроченные транши» — очередь, бейдж, «Продлить», «Открыть спор». */
+export type AdminListOverdueTranches = Response<
+  C.AdminOverdueTranchePage,
+  Res<"adminListOverdueTranches">
+>;
+export type AdminOverdueTranchesCount = Response<
+  C.AdminOverdueTrancheCount,
+  Res<"adminOverdueTranchesCount">
+>;
+export type AdminExtendOverdueTranche = Request<
+  Req<"adminExtendOverdueTranche">,
+  C.AdminOverdueExtendBody
+>;
+export type AdminExtendOverdueTrancheRes = Response<
+  C.AdminOverdueActionResult,
+  Res<"adminExtendOverdueTranche">
+>;
+export type AdminOpenOverdueDispute = Request<
+  Req<"adminOpenOverdueDispute">,
+  C.AdminOverdueDisputeBody
+>;
+export type AdminOpenOverdueDisputeRes = Response<
+  C.AdminOverdueActionResult,
+  Res<"adminOpenOverdueDispute">
+>;

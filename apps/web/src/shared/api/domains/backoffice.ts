@@ -9,12 +9,24 @@ import type {
   AdminOfferDecisionBody,
   AdminOfferList,
   AdminOfferListQuery,
+  AdminOverdueActionResult,
+  AdminOverdueDisputeBody,
+  AdminOverdueExtendBody,
+  AdminOverdueTrancheCount,
+  AdminOverdueTranchePage,
   AdminOverview,
   AdminRanking,
+  AdminStuckActionBody,
+  AdminStuckCard,
+  AdminStuckCount,
+  AdminStuckKind,
+  AdminStuckPage,
+  AdminStuckQuery,
   AdminTaxonomy,
   AdminTranchesPage,
   AdminTranchesQuery,
   ConfirmFundsRequest,
+  Order,
   PayoutConfirmedRequest,
   RankingPreview,
   RankingPreviewBody,
@@ -106,9 +118,70 @@ export interface BackofficeApi {
   /** `GET /admin/ranking` → 200. */
   getAdminRanking(signal?: AbortSignal): Promise<AdminRanking>;
 
-  /** `PUT /admin/ranking` → 200. Сумма весов ≠ 100 — 422. */
+  /** `PUT /admin/ranking` → 200. Набор весов полный (Q-363): неизвестный, повторный,
+      пропущенный фактор или вес вне 0..100 — 422 `admin/weights-invalid`
+      (`errors["weights.<key>"]`), сумма ≠ 100 — 422 `admin/weights-sum`. */
   updateAdminRanking(body: UpdateRankingBody): Promise<AdminRanking>;
 
   /** `POST /admin/ranking/preview` → 200. Считает, не сохраняя. */
   previewAdminRanking(body: RankingPreviewBody): Promise<RankingPreview>;
+
+  /* ───────── заказ: запасной путь «Доставлено» (п. 13, Q-332) ───────── */
+
+  /** `POST /admin/orders/{id}/delivered` → 200 с заказом в `acceptance`. Не `shipped` — 409. */
+  markAdminOrderDelivered(orderId: number): Promise<Order>;
+
+  /* ───────── «Зависшие» (п. 35) ───────── */
+
+  /** `GET /admin/stuck?kind&type&cursor&limit` → 200. Битый курсор — 400. */
+  listAdminStuck(query?: AdminStuckQuery, signal?: AbortSignal): Promise<AdminStuckPage>;
+
+  /** `GET /admin/stuck/count` → 200 — бейдж в меню. */
+  getAdminStuckCount(signal?: AbortSignal): Promise<AdminStuckCount>;
+
+  /** `GET /admin/stuck/{kind}/{id}` → 200; нет строки — 404. */
+  getAdminStuckCard(
+    kind: AdminStuckKind,
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<AdminStuckCard>;
+
+  /** `POST /admin/stuck/{kind}/{id}/retry` → 200. Уже не зависла — 409 `admin/stuck-not-stuck`,
+      держит воркер — 409 `admin/stuck-busy`. */
+  retryAdminStuck(
+    kind: AdminStuckKind,
+    id: string,
+    body: AdminStuckActionBody,
+  ): Promise<AdminStuckCard>;
+
+  /** `POST /admin/stuck/{kind}/{id}/resolve` → 200. Без комментария — 422
+      `admin/comment-required`; уже не зависла — 409. */
+  resolveAdminStuck(
+    kind: AdminStuckKind,
+    id: string,
+    body: AdminStuckActionBody,
+  ): Promise<AdminStuckCard>;
+
+  /* ───────── «Просроченные транши» (Q-401) ───────── */
+
+  /** `GET /admin/overdue-tranches` → 200: вторые транши 50/50, не оплаченные и после
+      автопродления. */
+  listAdminOverdueTranches(signal?: AbortSignal): Promise<AdminOverdueTranchePage>;
+
+  /** `GET /admin/overdue-tranches/count` → 200 — бейдж в меню. */
+  getAdminOverdueTrancheCount(signal?: AbortSignal): Promise<AdminOverdueTrancheCount>;
+
+  /** `POST /admin/overdue-tranches/{orderNo}/extend` → 200. Часы 1–336 и комментарий —
+      иначе 422; счёт уже оплачен — 409 `payments/tranche-already-paid`. */
+  extendAdminOverdueTranche(
+    orderNo: number,
+    body: AdminOverdueExtendBody,
+  ): Promise<AdminOverdueActionResult>;
+
+  /** `POST /admin/overdue-tranches/{orderNo}/dispute` → 200: счёт снят, спор открыт от
+      имени платформы. Без комментария — 422; счёт уже оплачен — 409. */
+  openAdminOverdueDispute(
+    orderNo: number,
+    body: AdminOverdueDisputeBody,
+  ): Promise<AdminOverdueActionResult>;
 }

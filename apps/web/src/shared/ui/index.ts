@@ -4,6 +4,8 @@
 export { AdminShell } from "./AdminShell";
 export { AuthShell } from "./AuthShell";
 export { CabinetShell } from "./CabinetShell";
+export { CategoryGrid, type CategoryGridProps } from "./CategoryGrid";
+export { categoryIcon } from "./category-icon";
 export { CheckoutShell } from "./CheckoutShell";
 export { COMPARE_TRAY_CLASS, useCompareTrayOffset } from "./compare-tray-offset";
 export { CompareTrayBar } from "./CompareTrayBar";

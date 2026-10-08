@@ -52,6 +52,14 @@ describe("роли", () => {
     }
   });
 
+  it("реквизиты организации — только владелец и бухгалтер (п. 24, Q-360)", () => {
+    expect(can("owner", "manage_requisites")).toBe(true);
+    expect(can("accountant", "manage_requisites")).toBe(true);
+    expect(can("manager", "manage_requisites")).toBe(false);
+    expect(can("technologist", "manage_requisites")).toBe(false);
+    expect(can("viewer", "manage_requisites")).toBe(false);
+  });
+
   it("наблюдатель видит финансы и больше ничего", () => {
     expect(can("viewer", "view_finance")).toBe(true);
     expect(can("viewer", "place_orders")).toBe(false);

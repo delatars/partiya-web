@@ -4,7 +4,9 @@ import type {
   CreateOrgBody,
   Me,
   Organization,
+  OrgRequisites,
   RequestCodeBody,
+  UpdateOrgRequisitesBody,
   VerifyCodeBody,
 } from "@partiya/api-contracts";
 
@@ -30,4 +32,10 @@ export interface AuthApi {
   revokeAuthSession(sessionId: string): Promise<void>;
   /** `POST /orgs` → 201. Тот же ИНН и вид — 409. */
   createOrg(body: CreateOrgBody): Promise<Organization>;
+  /** `GET /orgs/{id}/requisites` → 200 (DECISIONS.md, п. 24). Только владельцу и
+      бухгалтеру; остальным ролям и чужим — одинаковый 403. */
+  getOrgRequisites(orgId: string, signal?: AbortSignal): Promise<OrgRequisites>;
+  /** `PUT /orgs/{id}/requisites` → 200. Реквизиты целиком: не присланное поле стирается.
+      Ошибки — 422 `orgs/requisites-invalid` с `errors` по полям. */
+  updateOrgRequisites(orgId: string, body: UpdateOrgRequisitesBody): Promise<OrgRequisites>;
 }

@@ -14,11 +14,14 @@ export function OrderActions({
   order,
   onApproveArtwork,
   onRepeat,
+  onCancel,
   pending,
 }: {
   order: Order;
   onApproveArtwork: () => void;
   onRepeat: () => void;
+  /** Открыть подтверждение отмены (п. 17). */
+  onCancel: () => void;
   pending?: OrderActionKind;
 }) {
   const actions = orderActionsOf(order);
@@ -30,7 +33,11 @@ export function OrderActions({
     <div className="flex flex-col items-stretch gap-1.5 md:min-w-52">
       {actions.map((kind) => {
         const primary = isPrimaryAction(kind, actions);
-        const variant = primary ? "cta" : kind === "dispute" ? "ghost" : "default";
+        const variant = primary
+          ? "cta"
+          : kind === "dispute" || kind === "cancel"
+            ? "ghost"
+            : "default";
         const title =
           kind === "repeat" && discount != null && discount > 0
             ? `${ORDER_ACTION_TITLES.repeat} −${String(discount)} %`
@@ -58,7 +65,7 @@ export function OrderActions({
             key={kind}
             variant={variant}
             disabled={pending === kind}
-            onClick={kind === "repeat" ? onRepeat : onApproveArtwork}
+            onClick={kind === "repeat" ? onRepeat : kind === "cancel" ? onCancel : onApproveArtwork}
           >
             {pending === kind ? "Секунду…" : title}
           </Button>

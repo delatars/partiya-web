@@ -126,6 +126,10 @@ test("сквозной заказ: регистрация → оформлени
   // Макет уходит на согласование заказчику.
   await page.getByRole("button", { name: "Отправить макет технологу" }).click();
   await expect(main).not.toContainText("Отправить макет технологу");
+  // Двойная подпись: сначала технолог завода, затем заказчик.
+  const factoryApprove = main.getByRole("button", { name: "Согласовать макет" });
+  await factoryApprove.click();
+  await expect(factoryApprove).toHaveCount(0, { timeout: 30_000 });
 
   /* ── 6. Заказчик согласует макет, оставаясь на открытой странице трекинга ── */
   await logout(page);
@@ -228,17 +232,13 @@ test("сквозной заказ: регистрация → оформлени
   /* ── 12. Оператор отмечает доставку ───────────────────────────────────── */
   await logout(page);
   await loginByPhone(page, OPERATOR_PHONE);
-  /* Экрана заказов в бэк-офисе нет: `POST /admin/orders/{id}/delivered` существует на
-     бэкенде и описан в контракте, но ни одна страница его не зовёт (см. отчёт, Q-332).
-     Зовём его сессией оператора напрямую — иначе окно приёмки не открыть вообще. */
-  const delivered = await page.evaluate(async (no: string) => {
-    const response = await fetch(`/api/v1/admin/orders/${no}/delivered`, {
-      method: "POST",
-      credentials: "include",
-    });
-    return response.status;
-  }, orderId);
-  expect(delivered, "оператор отмечает партию доставленной").toBe(200);
+  /* Запасной путь оператора — экран «Доставка» (Q-332): номер заказа → подтверждение.
+     Штатно доставку отмечает завод с трек-номером (см. `runOrderToAcceptance`). */
+  await page.goto("/admin/delivery");
+  await main.getByLabel("Номер заказа").fill(orderId);
+  await main.getByRole("button", { name: "Доставлено…" }).click();
+  await main.getByRole("button", { name: "Да, доставлено" }).click();
+  await expect(main).toContainText(`Заказ № ${orderId} в приёмке`, { timeout: 30_000 });
 
   /* ── 13. Заказчик принимает партию с отзывом ──────────────────────────── */
   await logout(page);

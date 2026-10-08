@@ -1,9 +1,10 @@
 import type { Me, Order } from "@partiya/api-contracts";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, onTestFinished } from "vitest";
 
 import { isApiError } from "@/shared/api";
 import { DEMO_ORG_IDS, DEMO_USER_IDS } from "@/shared/lib/demo";
 import { encodeQuoteId, MOCK_QUOTE_TTL_MS } from "@/shared/lib/quote-id";
+import { setMockPromoCodesEnabled } from "@/shared/mocks";
 
 import { createMockOrdersBackend, type MockOrdersBackend } from "./mock-backend";
 
@@ -54,6 +55,9 @@ const customer: Me = {
 };
 
 const factoryActive: Me = { ...customer, activeOrgId: DEMO_ORG_IDS.volna, activeRole: "manager" };
+
+/** Тело `submit` с принятой офертой (п. 12). */
+const CONSENT = { offerAccepted: true, offerVersion: "2026-10-01" };
 
 function backend(me: Me = customer): MockOrdersBackend {
   return createMockOrdersBackend({
@@ -161,7 +165,18 @@ describe("создание черновика из котировки", () => {
     expect(repeat.id).toBe(first.id);
   });
 
-  it("промокод приезжает строкой котировки, а не отдельной скидкой", async () => {
+  it("промокоды выключены флагом (п. 10): даже ПАРТИЯ5 — 422 unknown_promo", async () => {
+    const api = backend();
+    expect(
+      await problemOf(api.createOrderDraft({ quoteId: quoteId({ promo: "ПАРТИЯ5" }) }, "key-1")),
+    ).toEqual({ status: 422, type: "https://partiya.ru/problems/quote/unknown_promo" });
+  });
+
+  it("при включённом флаге промокод приезжает строкой котировки", async () => {
+    setMockPromoCodesEnabled(true);
+    onTestFinished(() => {
+      setMockPromoCodesEnabled(false);
+    });
     const api = backend();
     const order = await api.createOrderDraft({ quoteId: quoteId({ promo: "ПАРТИЯ5" }) }, "key-1");
 
@@ -181,6 +196,10 @@ describe("создание черновика из котировки", () => {
   });
 
   it("неизвестный промокод — 422, а не молчаливая нулевая скидка", async () => {
+    setMockPromoCodesEnabled(true);
+    onTestFinished(() => {
+      setMockPromoCodesEnabled(false);
+    });
     const api = backend();
     expect(
       await problemOf(api.createOrderDraft({ quoteId: quoteId({ promo: "НЕТТАКОГО" }) }, "key-1")),
@@ -299,7 +318,7 @@ describe("PATCH черновика", () => {
     const api = backend();
     const draft = await api.createOrderDraft({ quoteId: quoteId() }, "key-1");
     const ready = await complete(api, draft);
-    await api.submitOrder(ready.id, "submit-1");
+    await api.submitOrder(ready.id, CONSENT, "submit-1");
 
     expect(
       await problemOf(api.updateOrderDraft(draft.id, { params: { fit: "оверсайз" } })),
@@ -373,7 +392,7 @@ describe("отправка заказа", () => {
     const draft = await api.createOrderDraft({ quoteId: quoteId() }, "key-1");
     const ready = await complete(api, draft);
 
-    const result = await api.submitOrder(ready.id, "submit-1");
+    const result = await api.submitOrder(ready.id, CONSENT, "submit-1");
 
     expect(result.order.status).toBe("awaiting_payment");
     expect(result.order.submittedAt).not.toBeNull();
@@ -395,7 +414,7 @@ describe("отправка заказа", () => {
     const draft = await api.createOrderDraft({ quoteId: quoteId() }, "key-1");
 
     try {
-      await api.submitOrder(draft.id, "submit-1");
+      await api.submitOrder(draft.id, CONSENT, "submit-1");
       throw new Error("ожидали 422");
     } catch (error) {
       if (!isApiError(error)) throw error;
@@ -411,8 +430,8 @@ describe("отправка заказа", () => {
     const draft = await api.createOrderDraft({ quoteId: quoteId() }, "key-1");
     const ready = await complete(api, draft);
 
-    const first = await api.submitOrder(ready.id, "submit-1");
-    const repeat = await api.submitOrder(ready.id, "submit-1");
+    const first = await api.submitOrder(ready.id, CONSENT, "submit-1");
+    const repeat = await api.submitOrder(ready.id, CONSENT, "submit-1");
 
     expect(repeat.order.id).toBe(first.order.id);
     expect(repeat.payment.invoiceNumber).toBe(first.payment.invoiceNumber);
@@ -424,9 +443,9 @@ describe("отправка заказа", () => {
     const api = backend();
     const draft = await api.createOrderDraft({ quoteId: quoteId() }, "key-1");
     const ready = await complete(api, draft);
-    await api.submitOrder(ready.id, "submit-1");
+    await api.submitOrder(ready.id, CONSENT, "submit-1");
 
-    expect(await problemOf(api.submitOrder(ready.id, "submit-2"))).toEqual({
+    expect(await problemOf(api.submitOrder(ready.id, CONSENT, "submit-2"))).toEqual({
       status: 409,
       type: "https://partiya.ru/problems/orders/not-draft",
     });
@@ -439,9 +458,65 @@ describe("отправка заказа", () => {
 
     tick(MOCK_QUOTE_TTL_MS + 1000);
 
-    expect(await problemOf(api.submitOrder(ready.id, "submit-1"))).toEqual({
+    expect(await problemOf(api.submitOrder(ready.id, CONSENT, "submit-1"))).toEqual({
       status: 409,
       type: "https://partiya.ru/problems/orders/quote-expired",
+    });
+  });
+
+  it("без принятия оферты — 422 offer-not-accepted с полями, заказ остаётся черновиком", async () => {
+    const api = backend();
+    const draft = await api.createOrderDraft({ quoteId: quoteId() }, "key-1");
+    const ready = await complete(api, draft);
+
+    try {
+      await api.submitOrder(ready.id, { offerAccepted: false, offerVersion: " " }, "submit-1");
+      throw new Error("ожидали 422");
+    } catch (error) {
+      if (!isApiError(error)) throw error;
+      expect(error.status).toBe(422);
+      expect(error.problem?.type).toBe("https://partiya.ru/problems/orders/offer-not-accepted");
+      expect(Object.keys(error.fieldErrors ?? {}).sort()).toEqual([
+        "offerAccepted",
+        "offerVersion",
+      ]);
+    }
+    expect((await api.getOrder(ready.id)).status).toBe("draft");
+
+    // версия — только латиница, цифры, «.», «-», «_»
+    expect(
+      await problemOf(
+        api.submitOrder(ready.id, { offerAccepted: true, offerVersion: "редакция 1" }, "s-2"),
+      ),
+    ).toEqual({ status: 422, type: "https://partiya.ru/problems/orders/offer-not-accepted" });
+  });
+});
+
+describe("отмена заказчиком (п. 17)", () => {
+  it("неоплаченный заказ отменяется с причиной; повтор — 200", async () => {
+    const api = backend();
+    const draft = await api.createOrderDraft({ quoteId: quoteId() }, "key-1");
+    const ready = await complete(api, draft);
+    const submitted = await api.submitOrder(ready.id, CONSENT, "submit-1");
+    expect(submitted.order.canCancel).toBe(true);
+
+    const cancelled = await api.cancelOrder(ready.id, { reason: "передумали" });
+    expect(cancelled.status).toBe("cancelled");
+    expect(cancelled.canCancel).toBe(false);
+    const again = await api.cancelOrder(ready.id, {});
+    expect(again.status).toBe("cancelled");
+  });
+
+  it("после оплаты — 409 cancel-after-payment", async () => {
+    const api = backend();
+    const draft = await api.createOrderDraft({ quoteId: quoteId() }, "key-1");
+    const ready = await complete(api, draft);
+    await api.submitOrder(ready.id, CONSENT, "submit-1");
+    const paid = await api.markPaid(ready.id);
+    expect(paid.canCancel).toBe(false);
+    expect(await problemOf(api.cancelOrder(ready.id, {}))).toEqual({
+      status: 409,
+      type: "https://partiya.ru/problems/orders/cancel-after-payment",
     });
   });
 });
@@ -451,7 +526,7 @@ describe("оплата и список кабинета", () => {
     const api = backend();
     const draft = await api.createOrderDraft({ quoteId: quoteId() }, "key-1");
     const ready = await complete(api, draft);
-    await api.submitOrder(ready.id, "submit-1");
+    await api.submitOrder(ready.id, CONSENT, "submit-1");
 
     const paid = await api.markPaid(ready.id);
     expect(paid.status).toBe("awaiting_confirmation");

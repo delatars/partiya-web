@@ -45,12 +45,9 @@ test.describe("Оформление партии", () => {
     await openStep(page, /Плательщик и документы/);
     await page.getByRole("checkbox", { name: /Принимаю договор-оферту/ }).check();
 
-    // шаг 4: оплата — заведомо неверный промокод отвергается
+    // шаг 4: оплата — промокоды выключены флагом `features.promoCodes`, поля нет
     await openStep(page, /^Оплата/);
-    await page.getByLabel("Промокод").fill("НЕТТАКОГО");
-    await page.getByRole("button", { name: "OK" }).click();
-    await expect(page.getByText(/не найден/)).toBeVisible();
-    await page.getByLabel("Промокод").fill("");
+    await expect(page.getByLabel("Промокод")).toHaveCount(0);
 
     await expect.poll(async () => normalize(await aside.innerText())).toContain("Итого 183 400 ₽");
 

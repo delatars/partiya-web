@@ -4,6 +4,7 @@ import type {
   DeclineOrderBody,
   DeclineSampleBody,
   FactoryOnboardingDraft,
+  MarkDeliveredBody,
   PhotoReportBody,
   PhotoReportUploadRequest,
   PhotoReportUploadResponse,
@@ -78,6 +79,10 @@ export function createSellerHttpApi(client: HttpClient): SellerApi {
 
     advanceSellerStage(id: number, body: AdvanceStageBody): Promise<SellerOrder> {
       return client.post<SellerOrder>(`${order(id)}/stage`, { body });
+    },
+
+    markSellerOrderDelivered(id: number, body: MarkDeliveredBody): Promise<SellerOrder> {
+      return client.post<SellerOrder>(`${order(id)}/delivered`, { body });
     },
 
     requestPhotoReportUpload(

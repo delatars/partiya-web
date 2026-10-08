@@ -4,6 +4,7 @@ import type {
   DeclineOrderBody,
   DeclineSampleBody,
   FactoryOnboardingDraft,
+  MarkDeliveredBody,
   PhotoReportBody,
   PhotoReportUploadRequest,
   PhotoReportUploadResponse,
@@ -63,6 +64,11 @@ export interface SellerApi {
 
   /** `POST /seller/orders/{id}/stage` → 200. Недопустимый переход — 409, не команда — 400. */
   advanceSellerStage(id: number, body: AdvanceStageBody): Promise<SellerOrder>;
+
+  /** `POST /seller/orders/{id}/delivered` → 200 (DECISIONS.md, п. 13): завод отмечает
+      доставку по трек-номеру, `shipped → acceptance`. Не тот статус или повтор — 409,
+      трек-номер пуст или длиннее 64 символов — 422 `seller/invalid-tracking-number`. */
+  markSellerOrderDelivered(id: number, body: MarkDeliveredBody): Promise<SellerOrder>;
 
   /** `POST /seller/orders/{id}/photo-report/upload` → 200 с presigned-ссылкой. */
   requestPhotoReportUpload(

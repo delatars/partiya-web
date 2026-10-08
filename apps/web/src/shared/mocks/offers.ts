@@ -395,33 +395,6 @@ const FIXTURES: OfferFixture[] = [
     tone: "c",
     category: BAGS,
   },
-
-  {
-    id: 2187,
-    title: "Свечи в гипсовом кашпо, 200 мл",
-    price: 210,
-    moq: 200,
-    lead: 14,
-    free: 61,
-    factory: "format",
-    material: "other",
-    tone: "c",
-    category: ["svechi"],
-    sample: true,
-    hit: true,
-  },
-  {
-    id: 2179,
-    title: "Ароматические саше, крафт",
-    price: 64,
-    moq: 500,
-    lead: 10,
-    free: 48,
-    factory: "format",
-    material: "other",
-    tone: "d",
-    category: ["svechi"],
-  },
 ];
 
 /** Порог бейджа «−15 % мощность»: завод продаёт недозагруз со скидкой. */

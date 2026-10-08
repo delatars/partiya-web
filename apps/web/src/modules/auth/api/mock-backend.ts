@@ -4,15 +4,19 @@ import type {
   CreateOrgBody,
   Me,
   Organization,
+  OrgBankAccount,
   OrgKind,
+  OrgRequisites,
   OrgRole,
   RequestCodeBody,
+  UpdateOrgRequisitesBody,
   VerifyCodeBody,
 } from "@partiya/api-contracts";
 
 import { ApiError } from "@/shared/api";
 import { DEMO_ORG_IDS, DEMO_USER_IDS } from "@/shared/lib/demo";
-import { ROLE_TITLES } from "@/shared/lib/roles";
+import { normalizeBank, presentOrNull, validateRequisites } from "@/shared/lib/requisites";
+import { can, ROLE_TITLES } from "@/shared/lib/roles";
 
 import { isValidInn, looksLikeEmail, normalizeEmail, normalizePhone } from "../lib/schemas";
 
@@ -35,7 +39,8 @@ const POLICY = {
   resendAfterMs: 60_000,
 } as const;
 
-const STORAGE_KEY = "partiya.mock.auth.v1";
+/* v2: реквизиты организации (п. 24). */
+const STORAGE_KEY = "partiya.mock.auth.v2";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 
 interface MockUser {
@@ -56,6 +61,11 @@ interface MockOrg {
   kpp: string | null;
   verificationStatus: Organization["verificationStatus"];
   createdAt: string;
+  /** Реквизиты (п. 24, Q-360). Необязательны: старое состояние из sessionStorage их не знает. */
+  ogrn?: string | null;
+  legalAddress?: string | null;
+  bank?: OrgBankAccount | null;
+  requisitesUpdatedAt?: string | null;
 }
 
 interface MockMembership {
@@ -196,6 +206,16 @@ function seedState(): MockState {
       kpp: "770101001",
       verificationStatus: "verified",
       createdAt: SEEDED_AT,
+      // демо-реквизиты: контрольные суммы сходятся (ОГРН и счёт под БИК 044525225)
+      ogrn: "1027700132195",
+      legalAddress: "125047, Москва, ул. Лесная, д. 9, офис 412",
+      bank: {
+        bankName: "ПАО Сбербанк",
+        bik: "044525225",
+        account: "40702810200000012345",
+        correspondentAccount: "30101810400000000225",
+      },
+      requisitesUpdatedAt: SEEDED_AT,
     },
     {
       id: DEMO_ORG_IDS.volna,
@@ -240,6 +260,8 @@ export interface MockAuthBackend {
   listAuthSessions(): Promise<AuthSessionList>;
   revokeAuthSession(sessionId: string): Promise<void>;
   createOrg(body: CreateOrgBody): Promise<Organization>;
+  getOrgRequisites(orgId: string): Promise<OrgRequisites>;
+  updateOrgRequisites(orgId: string, body: UpdateOrgRequisitesBody): Promise<OrgRequisites>;
   /** Только для тестов и дев-инструментов: начать с чистого листа. */
   reset(): void;
 }
@@ -296,6 +318,29 @@ export function createMockAuthBackend(options: MockAuthOptions = {}): MockAuthBa
     if (!session) throw unauthorized();
     session.lastSeenAtMs = now();
     return session;
+  }
+
+  /** Q-360: реквизиты видят и правят только владелец и бухгалтер этой организации;
+      остальным ролям и чужим — одинаковый 403 (по ответу не понять, есть ли организация). */
+  function requireRequisitesAccess(orgId: string): MockOrg {
+    const session = requireSession();
+    const member = state.members.find(
+      (row) => row.userId === session.userId && row.orgId === orgId,
+    );
+    const org = state.orgs.find((row) => row.id === orgId);
+    if (!member || !org || !can(member.role, "manage_requisites")) throw forbidden();
+    return org;
+  }
+
+  function toRequisites(org: MockOrg): OrgRequisites {
+    return {
+      orgId: org.id,
+      ogrn: org.ogrn ?? null,
+      kpp: org.kpp,
+      legalAddress: org.legalAddress ?? null,
+      bank: org.bank ?? null,
+      updatedAt: org.requisitesUpdatedAt ?? null,
+    };
   }
 
   function membershipsOf(userId: string): { org: MockOrg; role: OrgRole }[] {
@@ -544,6 +589,38 @@ export function createMockAuthBackend(options: MockAuthOptions = {}): MockAuthBa
         session.activeOrgId = org.id;
         save();
         return toOrganization(org, "owner");
+      });
+    },
+
+    getOrgRequisites(orgId: string): Promise<OrgRequisites> {
+      return respond(latencyMs, () => toRequisites(requireRequisitesAccess(orgId)));
+    },
+
+    updateOrgRequisites(orgId: string, body: UpdateOrgRequisitesBody): Promise<OrgRequisites> {
+      return respond(latencyMs, () => {
+        const org = requireRequisitesAccess(orgId);
+        const errors = validateRequisites(org.inn, body);
+        if (Object.keys(errors).length > 0) {
+          throw new ApiError({
+            status: 422,
+            message: "реквизиты не прошли проверку",
+            problem: {
+              type: "https://partiya.ru/problems/orgs/requisites-invalid",
+              title: "Проверьте реквизиты",
+              status: 422,
+              detail: "реквизиты не прошли проверку",
+              errors,
+            },
+          });
+        }
+        // PUT — реквизиты целиком: не присланное поле стирается
+        org.ogrn = presentOrNull(body.ogrn);
+        org.kpp = presentOrNull(body.kpp);
+        org.legalAddress = presentOrNull(body.legalAddress);
+        org.bank = normalizeBank(body.bank);
+        org.requisitesUpdatedAt = new Date(now()).toISOString();
+        save();
+        return toRequisites(org);
       });
     },
 

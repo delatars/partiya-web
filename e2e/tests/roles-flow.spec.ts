@@ -1,8 +1,8 @@
 import { expect, loginAs, logout, normalize, test } from "../fixtures";
 
 /* Сквозной сценарий трёх ролей на одном заказе 4811 — без демо-пульта: каждый переход
-   делает настоящий экран своей роли. Заканчивается выплатой заводу 168 728 ₽
-   (183 400 ₽ минус комиссия платформы).
+   делает настоящий экран своей роли. Заканчивается выплатой заводу 169 480 ₽
+   (183 400 ₽ минус 8 % с товара: доставка 9 400 ₽ комиссией не облагается).
 
    Всё внутри одного теста и одного контекста: состояние заказа живёт в хранилище
    браузера, разнести шаги по тестам значило бы потерять его между ними. */
@@ -30,8 +30,10 @@ test("заказ 4811 проходит путь заказчик → опера�
   await loginAs(page, "Оператор");
   await page.goto("/admin/finance");
   await expect(main).toContainText("4811");
-  await page.getByRole("button", { name: "Подтвердить поступление" }).first().click();
-  await expect(page.getByRole("button", { name: "Подтвердить поступление" })).toHaveCount(0);
+  // в очереди есть и чужие счета (второй транш 4795 у оператора, Q-401) — берём строку 4811
+  const invoice4811 = page.locator("tr", { hasText: "заказу № 4811," });
+  await invoice4811.getByRole("button", { name: "Подтвердить поступление" }).click();
+  await expect(invoice4811).toHaveCount(0);
 
   // ── 3. завод: подтвердить заказ и отправить макет технологу
   await logout(page);
@@ -45,6 +47,10 @@ test("заказ 4811 проходит путь заказчик → опера�
   await expect(main).toContainText("В производстве");
 
   await page.getByRole("button", { name: "Отправить макет технологу" }).click();
+  // двойная подпись: технолог завода согласует производимость, заказчик — визуал
+  const approve = page.getByRole("button", { name: "Согласовать макет" });
+  await approve.click();
+  await expect(approve).toHaveCount(0);
   await expect(main).toContainText("Следующий шаг за заказчиком");
 
   // ── 4. заказчик согласовывает макет
@@ -81,6 +87,13 @@ test("заказ 4811 проходит путь заказчик → опера�
   await ship.click();
   await expect(ship).toHaveCount(0);
 
+  // доставку отмечает завод с трек-номером — с неё открывается окно приёмки
+  await page.getByRole("button", { name: "Доставлено…" }).click();
+  await page.getByLabel(/Трек-номер перевозчика/).fill("CDEK-1234567890");
+  await page.getByRole("button", { name: "Отметить «Доставлено»" }).click();
+  await expect(main).toContainText("CDEK-1234567890");
+  await expect(page.getByRole("button", { name: "Доставлено…" })).toHaveCount(0);
+
   // ── 6. заказчик принимает партию
   await logout(page);
   await loginAs(page, "Заказчик");
@@ -98,6 +111,6 @@ test("заказ 4811 проходит путь заказчик → опера�
   await logout(page);
   await loginAs(page, "Завод");
   await page.goto("/finance");
-  await expect.poll(async () => normalize(await main.innerText())).toContain("168 728 ₽");
+  await expect.poll(async () => normalize(await main.innerText())).toContain("169 480 ₽");
   await expect(main).toContainText(/183[\s\u00a0\u202f]400/u);
 });

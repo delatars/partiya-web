@@ -39,6 +39,8 @@ export type Permission =
   | "sign_documents"
   | "view_finance"
   | "manage_organization"
+  /** Видеть и менять реквизиты (ОГРН, адрес, банк) — `Permission::ManageRequisites`, п. 24. */
+  | "manage_requisites"
   | "run_production";
 
 /** Строки таблицы «Что может каждая роль» — тексты из макета. */
@@ -48,6 +50,7 @@ export const PERMISSION_TITLES: Record<Permission, string> = {
   sign_documents: "Подписывать документы",
   view_finance: "Видеть эскроу и счета",
   manage_organization: "Менять реквизиты и роли",
+  manage_requisites: "Видеть и менять банковские реквизиты",
   run_production: "Вести производство: макеты, прогресс",
 };
 
@@ -83,7 +86,11 @@ export function can(role: OrgRole, permission: Permission): boolean {
         permission === "run_production"
       );
     case "accountant":
-      return permission === "sign_documents" || permission === "view_finance";
+      return (
+        permission === "sign_documents" ||
+        permission === "view_finance" ||
+        permission === "manage_requisites"
+      );
     case "technologist":
       return permission === "run_production";
   }

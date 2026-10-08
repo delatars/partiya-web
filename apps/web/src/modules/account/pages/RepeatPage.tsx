@@ -7,6 +7,7 @@ import { getApiService, isApiError, ORDER_KEYS, orderListOptions } from "@/share
 import { formatIsoDayMonth } from "@/shared/lib/dates";
 import { formatNumber, formatRub, toRubles } from "@/shared/lib/format";
 import { plural } from "@/shared/lib/plural";
+import { QUOTE_TTL_DAYS } from "@/shared/lib/quote-id";
 import { AppLink, useAppNavigate } from "@/shared/ui";
 
 /* Макет: экран `repeat` — «Повторные партии».
@@ -47,8 +48,8 @@ export function RepeatPage() {
       <header className="mt-1 mb-3.5">
         <h1 className="font-heading text-2xl font-bold">Повторные партии</h1>
         <p className="text-muted mt-1 max-w-[80ch]">
-          Сохранённые спецификации. Повтор у той же фабрики — со скидкой, цена фиксируется на 30
-          дней.
+          Сохранённые спецификации. Повтор у той же фабрики — со скидкой, цена фиксируется на{" "}
+          {QUOTE_TTL_DAYS} дней.
         </p>
       </header>
 
@@ -70,7 +71,11 @@ export function RepeatPage() {
             rows[0]?.repeatDiscountPercent ? `−${String(rows[0].repeatDiscountPercent)} %` : "—"
           }
         />
-        <KpiTile label="Цена зафиксирована" value="30 дней" delta="с момента повтора" />
+        <KpiTile
+          label="Цена зафиксирована"
+          value={`${String(QUOTE_TTL_DAYS)} дней`}
+          delta="с момента повтора"
+        />
       </div>
 
       {error !== undefined && (

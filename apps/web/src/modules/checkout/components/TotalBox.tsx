@@ -18,6 +18,8 @@ export interface TotalBoxProps {
   order: Order;
   quote: Quote | undefined;
   recalculating: boolean;
+  /** Промокоды включены фиче-флагом (п. 10); выключены — поля нет вовсе. */
+  promoEnabled: boolean;
   /** Применённый промокод из URL; пусто — поле чистое. */
   promo: string | undefined;
   promoError: string | undefined;
@@ -39,6 +41,7 @@ export function TotalBox({
   order,
   quote,
   recalculating,
+  promoEnabled,
   promo,
   promoError,
   promoPending,
@@ -117,34 +120,39 @@ export function TotalBox({
           : ""}
       </p>
 
-      <div className="mt-2.5 flex gap-2">
-        <Input
-          value={draft}
-          placeholder="Промокод"
-          aria-label="Промокод"
-          invalid={promoError !== undefined}
-          disabled={promoPending}
-          onChange={(event) => {
-            setDraft(event.target.value);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
+      {/* п. 10: поле промокода — только при включённом флаге (`shared/lib/features.ts`) */}
+      {promoEnabled && (
+        <div className="mt-2.5 flex gap-2">
+          <Input
+            value={draft}
+            placeholder="Промокод"
+            aria-label="Промокод"
+            invalid={promoError !== undefined}
+            disabled={promoPending}
+            onChange={(event) => {
+              setDraft(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                onApplyPromo(draft);
+              }
+            }}
+          />
+          <Button
+            disabled={promoPending || draft.trim().length === 0}
+            onClick={() => {
               onApplyPromo(draft);
-            }
-          }}
-        />
-        <Button
-          disabled={promoPending || draft.trim().length === 0}
-          onClick={() => {
-            onApplyPromo(draft);
-          }}
-        >
-          {promoPending ? <Spinner size="sm" label="Проверяем" /> : "OK"}
-        </Button>
-      </div>
-      {promoError !== undefined && <p className="text-danger mt-1 text-xs">{promoError}</p>}
-      {promo !== undefined && promoError === undefined && (
+            }}
+          >
+            {promoPending ? <Spinner size="sm" label="Проверяем" /> : "OK"}
+          </Button>
+        </div>
+      )}
+      {promoEnabled && promoError !== undefined && (
+        <p className="text-danger mt-1 text-xs">{promoError}</p>
+      )}
+      {promoEnabled && promo !== undefined && promoError === undefined && (
         <p className="text-discount mt-1 text-xs">
           Промокод {promo} применён ·{" "}
           <button

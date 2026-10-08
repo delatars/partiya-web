@@ -34,7 +34,19 @@ export interface OrderFeedState {
   refresh: () => void;
 }
 
-export function useOrderFeed(orderId: number, initial: OrderEvent[]): OrderFeedState {
+export interface OrderFeedOptions {
+  /** Заказ изменился (статус, документ, деньги, прогресс). Кабинет завода держит заказ
+      в своём кэше (`SELLER_KEYS`), заказчик — в `ORDER_KEYS`; второй инвалидируется всегда. */
+  onOrderChanged?: () => void;
+}
+
+export function useOrderFeed(
+  orderId: number,
+  initial: OrderEvent[],
+  options: OrderFeedOptions = {},
+): OrderFeedState {
+  const onOrderChanged = useRef(options.onOrderChanged);
+  onOrderChanged.current = options.onOrderChanged;
   const queryClient = useQueryClient();
   const [events, setEvents] = useState<OrderEvent[]>(initial);
   const [connection, setConnection] = useState<StreamState>("connecting");
@@ -77,6 +89,7 @@ export function useOrderFeed(orderId: number, initial: OrderEvent[]): OrderFeedS
       if (touchesOrder) {
         void queryClient.invalidateQueries({ queryKey: ORDER_KEYS.detail(orderId) });
         void queryClient.invalidateQueries({ queryKey: ORDER_KEYS.lists() });
+        onOrderChanged.current?.();
       }
       if (incoming.some((event) => event.type === "message")) {
         void queryClient.invalidateQueries({ queryKey: MESSAGE_KEYS.list(orderId, "order") });

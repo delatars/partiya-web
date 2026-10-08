@@ -11,7 +11,17 @@ export const AUTH_KEYS = {
   all: ["auth"] as const,
   session: () => [...AUTH_KEYS.all, "session"] as const,
   sessions: () => [...AUTH_KEYS.all, "sessions"] as const,
+  requisites: (orgId: string) => [...AUTH_KEYS.all, "requisites", orgId] as const,
 };
+
+/** Реквизиты организации (п. 24) — вкладка «Реквизиты» на /company. 403 у ролей без права. */
+export const orgRequisitesOptions = (orgId: string) =>
+  queryOptions({
+    queryKey: AUTH_KEYS.requisites(orgId),
+    queryFn: ({ signal }) => getApiService().getOrgRequisites(orgId, signal),
+    staleTime: 60_000,
+    retry: false,
+  });
 
 /** «Кто я» поверх `GET /me`.
  *

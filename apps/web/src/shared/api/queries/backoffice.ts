@@ -2,6 +2,8 @@ import type {
   AdminDisputeListQuery,
   AdminFactoryListQuery,
   AdminOfferListQuery,
+  AdminStuckKind,
+  AdminStuckQuery,
 } from "@partiya/api-contracts";
 import { queryOptions } from "@tanstack/react-query";
 
@@ -21,6 +23,13 @@ export const ADMIN_KEYS = {
   finance: () => [...ADMIN_KEYS.all, "finance"] as const,
   taxonomy: (path: string) => [...ADMIN_KEYS.all, "taxonomy", path] as const,
   ranking: () => [...ADMIN_KEYS.all, "ranking"] as const,
+  stuck: () => [...ADMIN_KEYS.all, "stuck"] as const,
+  stuckList: (query: AdminStuckQuery) => [...ADMIN_KEYS.stuck(), "list", query] as const,
+  stuckCount: () => [...ADMIN_KEYS.stuck(), "count"] as const,
+  stuckCard: (kind: AdminStuckKind, id: string) =>
+    [...ADMIN_KEYS.stuck(), "card", kind, id] as const,
+  overdue: () => [...ADMIN_KEYS.all, "overdue-tranches"] as const,
+  overdueCount: () => [...ADMIN_KEYS.overdue(), "count"] as const,
 };
 
 export const adminOverviewOptions = () =>
@@ -70,6 +79,40 @@ export const adminTaxonomyOptions = (path = "") =>
     queryKey: ADMIN_KEYS.taxonomy(path),
     queryFn: ({ signal }) => getApiService().getAdminTaxonomy(path || undefined, signal),
     staleTime: 60_000,
+  });
+
+/** Бейдж «Зависшие» в меню (п. 35): пушей нет, поэтому счётчик опрашивается раз в минуту. */
+export const adminStuckCountOptions = () =>
+  queryOptions({
+    queryKey: ADMIN_KEYS.stuckCount(),
+    queryFn: ({ signal }) => getApiService().getAdminStuckCount(signal),
+    staleTime: 0,
+    refetchInterval: 60_000,
+  });
+
+/** «Просроченные транши» (Q-401): очередь целиком — строк единицы. */
+export const adminOverdueTranchesOptions = () =>
+  queryOptions({
+    queryKey: ADMIN_KEYS.overdue(),
+    queryFn: ({ signal }) => getApiService().listAdminOverdueTranches(signal),
+    staleTime: 0,
+  });
+
+/** Бейдж «Просроченные транши» в меню: пушей нет — опрос раз в минуту. */
+export const adminOverdueTrancheCountOptions = () =>
+  queryOptions({
+    queryKey: ADMIN_KEYS.overdueCount(),
+    queryFn: ({ signal }) => getApiService().getAdminOverdueTrancheCount(signal),
+    staleTime: 0,
+    refetchInterval: 60_000,
+  });
+
+/** Карточка строки «Зависших»: ошибка целиком, payload, история действий. */
+export const adminStuckCardOptions = (kind: AdminStuckKind, id: string) =>
+  queryOptions({
+    queryKey: ADMIN_KEYS.stuckCard(kind, id),
+    queryFn: ({ signal }) => getApiService().getAdminStuckCard(kind, id, signal),
+    staleTime: 0,
   });
 
 export const adminRankingOptions = () =>

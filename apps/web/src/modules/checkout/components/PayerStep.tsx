@@ -4,6 +4,8 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
+import { OFFER_VERSION_TITLE } from "@/shared/lib/offer-terms";
+
 import { payerPatchOf, payerStepSchema, type PayerStepForm } from "../lib/schemas";
 import { useDebouncedCallback } from "../lib/use-debounced";
 import { SaveBadge, type SaveState } from "./SaveBadge";
@@ -13,8 +15,9 @@ import { SaveBadge, type SaveState } from "./SaveBadge";
    Здесь это отдельный шаг: реквизиты уходят в счёт и в договор, и смешивать их с
    выбором схемы эскроу — значит прятать юридически значимый выбор под радиокнопкой.
 
-   ⚠ Галочка принятия оферты никуда не отправляется: `POST /orders/{id}/submit` тела не
-   имеет (ARCHITECTURE.md, 8.4). См. отчёт, Q-C5. */
+   Галочка принятия оферты уходит в тело `POST /orders/{id}/submit` вместе с редакцией
+   оферты (`OFFER_VERSION`, DECISIONS.md, п. 12); без неё сервер отвечает 422
+   `orders/offer-not-accepted`. До отправки она живёт только в браузере. */
 
 export interface PayerStepProps {
   order: Order;
@@ -143,6 +146,9 @@ export function PayerStep({
           rowClassName="items-start"
           label="Принимаю договор-оферту платформы и согласен со спецификацией заказа"
         />
+        <p className="text-muted mt-0.5 ps-6 text-xs">
+          Договор-оферта, {OFFER_VERSION_TITLE} Время принятия фиксирует платформа.
+        </p>
         {errors.accepted?.message !== undefined && (
           <p className="text-danger mt-0.5 text-xs">{errors.accepted.message}</p>
         )}

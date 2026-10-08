@@ -105,3 +105,48 @@ export interface CreateOrgBody {
   inn: string;
   kpp?: string | null;
 }
+
+/* ─────────────────────────── реквизиты организации (п.24) ─────────────────────────── */
+
+/** Банковский счёт организации. Ключ счёта проверяется по БИК. */
+export interface OrgBankAccount {
+  bankName: string;
+  /** 9 цифр. */
+  bik: string;
+  /** Расчётный счёт, 20 цифр. */
+  account: string;
+  /** Корсчёт банка (20 цифр, `30101…`); `null` только у подразделений Банка России. */
+  correspondentAccount: string | null;
+}
+
+/** `GET /orgs/{id}/requisites` — экран «Компания». Видны только владельцу и бухгалтеру,
+    остальным ролям — 403. Заказ берёт адрес плательщика снимком отсюда (`OrderPayer.legalAddress`). */
+export interface OrgRequisites {
+  orgId: string;
+  /** ОГРН (13 цифр) у юрлица, ОГРНИП (15 цифр) у ИП. */
+  ogrn: string | null;
+  /** КПП — только у юрлица; та же колонка, что `Organization.kpp`. */
+  kpp: string | null;
+  legalAddress: string | null;
+  bank: OrgBankAccount | null;
+  /** Последняя правка, RFC 3339; `null` — реквизиты ни разу не меняли. */
+  updatedAt: string | null;
+}
+
+/** Банковский блок формы. Блок, где все поля пустые, — «счёта нет». */
+export interface OrgBankAccountInput {
+  bankName?: string | null;
+  bik?: string | null;
+  account?: string | null;
+  correspondentAccount?: string | null;
+}
+
+/** `PUT /orgs/{id}/requisites` — реквизиты целиком: не присланное поле стирается.
+    Ошибки — 422 `…/problems/orgs/requisites-invalid`, `errors` по полям: `ogrn`, `kpp`,
+    `legalAddress`, `bank.bankName`, `bank.bik`, `bank.account`, `bank.correspondentAccount`. */
+export interface UpdateOrgRequisitesBody {
+  ogrn?: string | null;
+  kpp?: string | null;
+  legalAddress?: string | null;
+  bank?: OrgBankAccountInput | null;
+}

@@ -42,6 +42,27 @@ describe("действия по статусу заказа", () => {
     expect(orderActions({ status: "completed" })).toEqual(["repeat"]);
   });
 
+  it("отмена — только когда её разрешил сервер (п. 17), и всегда последней", () => {
+    expect(orderActions({ status: "awaiting_payment", canCancel: true })).toEqual([
+      "pay",
+      "cancel",
+    ]);
+    expect(orderActions({ status: "draft", canCancel: true })).toEqual([
+      "continue_draft",
+      "cancel",
+    ]);
+    expect(orderActions({ status: "awaiting_confirmation" })).not.toContain("cancel");
+    expect(isPrimaryAction("cancel", orderActions({ status: "draft", canCancel: true }))).toBe(
+      false,
+    );
+  });
+
+  it("своя подпись под макетом уже стоит — кнопки «Согласовать» нет (п. 16)", () => {
+    expect(orderActions({ status: "artwork_review", artworkSignedByCustomer: true })).toEqual([
+      "message",
+    ]);
+  });
+
   it("у закрытых заказов действий нет", () => {
     const closed: OrderStatus[] = ["declined", "refunded", "cancelled"];
     for (const status of closed) expect(orderActions({ status })).toEqual([]);

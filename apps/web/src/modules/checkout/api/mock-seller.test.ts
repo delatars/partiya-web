@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { isApiError } from "@/shared/api";
 import { DEMO_ORG_IDS, DEMO_USER_IDS } from "@/shared/lib/demo";
+import { encodeQuoteId } from "@/shared/lib/quote-id";
 import { resetSellerOffers } from "@/shared/mocks";
 
 import { createMockOrdersBackend, type MockOrdersBackend } from "./mock-backend";
@@ -92,7 +93,8 @@ beforeEach(() => {
 /** Сквозной заказ фикстур: «Кора» → «Волна», 183 400 ₽, ждёт оплаты. */
 const ORDER = 4811;
 const TOTAL = 18_340_000;
-const PAYOUT = 16_872_800;
+/** п. 2: комиссия 8 % только со стоимости товара: (183 400 − 9 400 доставки) × 8 % = 13 920 ₽. */
+const PAYOUT = 16_948_000;
 
 async function problemOf(work: () => Promise<unknown>): Promise<{ status: number; type?: string }> {
   try {
@@ -190,12 +192,26 @@ describe("жизненный цикл заказа через три роли", 
     as(CUSTOMER);
     expect((await api.getOrder(ORDER)).status).toBe("confirmed");
 
-    // 4. завод отправляет макет технологу, заказчик согласовывает
+    // 4. завод отправляет макет технологу; согласуют обе стороны (п. 16), порядок любой
     as(FACTORY);
     await api.advanceSellerStage(ORDER, { command: "start_artwork_review" });
     as(CUSTOMER);
     expect((await api.getOrder(ORDER)).status).toBe("artwork_review");
-    await api.approveArtwork(ORDER);
+    const signed = await api.approveArtwork(ORDER);
+    // подпись заказчика есть, технолога нет — заказ ждёт второй подписи
+    expect(signed.status).toBe("artwork_review");
+    expect(signed.artworkSignoff?.customerApprovedAt).not.toBeNull();
+    expect(signed.artworkSignoff?.factoryApprovedAt).toBeNull();
+    // повторная подпись — без изменений
+    expect((await api.approveArtwork(ORDER)).status).toBe("artwork_review");
+
+    as(FACTORY);
+    const review = await api.getSellerOrder(ORDER);
+    expect(review.availableCommands).toEqual(["approve_artwork"]);
+    const approved = await api.advanceSellerStage(ORDER, { command: "approve_artwork" });
+    expect(approved.status).toBe("materials");
+    expect(approved.artworkSignoff?.factoryApprovedAt).not.toBeNull();
+    as(CUSTOMER);
     expect((await api.getOrder(ORDER)).status).toBe("materials");
 
     // 5. производство, прогресс и фотоотчёт
@@ -223,19 +239,40 @@ describe("жизненный цикл заказа через три роли", 
     expect(tracked.tracking?.photoCount ?? 0).toBeGreaterThan(0);
     expect(tracked.tracking?.progress.some((row) => row.done === 650)).toBe(true);
 
-    // 6. контроль качества и отгрузка; доставку отмечает система (Q-S1)
+    // 6. контроль качества и отгрузка; «Доставлено» отмечает завод по трек-номеру (п. 13)
     as(FACTORY);
     await api.advanceSellerStage(ORDER, { command: "start_quality_control" });
     tick(60_000);
     const shipped = await api.advanceSellerStage(ORDER, { command: "ship" });
-    expect(shipped.status).toBe("acceptance");
+    expect(shipped.status).toBe("shipped");
+    expect(shipped.canMarkDelivered).toBe(true);
+    expect(
+      (await problemOf(() => api.markSellerOrderDelivered(ORDER, { trackingNumber: "   " }))).type,
+    ).toBe("https://partiya.ru/problems/seller/invalid-tracking-number");
+    const delivered = await api.markSellerOrderDelivered(ORDER, {
+      trackingNumber: "  CDEK-1234567890 ",
+    });
+    expect(delivered.status).toBe("acceptance");
+    expect(delivered.trackingNumber).toBe("CDEK-1234567890");
+    // повтор — 409
+    expect(
+      (await problemOf(() => api.markSellerOrderDelivered(ORDER, { trackingNumber: "X" }))).status,
+    ).toBe(409);
 
-    // 7. заказчик принимает партию
+    // 7. заказчик видит трек-номер и принимает партию
     as(CUSTOMER);
+    expect((await api.getOrder(ORDER)).trackingNumber).toBe("CDEK-1234567890");
     const accepted = await api.acceptOrder(ORDER, {}, "accept-1");
     expect(accepted.status).toBe("completed");
 
-    // 8. у завода появилась выплата 168 728 ₽ при заказе 183 400 ₽
+    // Q-335: до выплаты оператором — ступень «Принят заказчиком»
+    as(FACTORY);
+    expect((await api.getSellerOrder(ORDER)).sellerStage).toBe("accepted");
+    const acceptedTab = await api.listSellerOrders({ stage: "accepted" });
+    expect(acceptedTab.items.some((item) => item.id === ORDER)).toBe(true);
+    expect(acceptedTab.summary.accepted).toBeGreaterThanOrEqual(1);
+
+    // 8. у завода появилась выплата 169 480 ₽ при заказе 183 400 ₽
     as(FACTORY);
     const payouts = await api.listSellerPayouts();
     const payout = payouts.items.find((row) => row.orderId === ORDER);
@@ -266,6 +303,111 @@ describe("жизненный цикл заказа через три роли", 
     await api.confirmDealPayout(ready?.dealId ?? "", {}, "payout-1");
     const after = await api.getAdminFinance();
     expect(after.payouts.find((row) => row.orderId === ORDER)?.status).toBe("released");
+
+    // после выплаты — ступень «Выплачено»
+    as(FACTORY);
+    expect((await api.getSellerOrder(ORDER)).sellerStage).toBe("paid_out");
+  });
+
+  it("разовая оплата: назначение с номером заказа, счёт N-СЧ", async () => {
+    as(OPERATOR);
+    const first = (await api.getAdminFinance()).tranches.find((row) => row.orderId === ORDER);
+    expect(first?.reference).toBe("Оплата по заказу № 4811, спецификация 4811-С. Без НДС");
+  });
+
+  it("50/50: второй транш — при переходе в КК; до его оплаты отгрузки нет", async () => {
+    // новый заказ «Коры» у «Волны» по схеме 50/50
+    as(CUSTOMER);
+    const draft = await api.createOrderDraft(
+      {
+        quoteId: encodeQuoteId(
+          { offerId: 2231, qty: 1000, optionIds: ["extra-print-color"], deliveryId: "wb" },
+          clock,
+        ),
+      },
+      "draft-split",
+    );
+    const upload = await api.requestArtworkUpload(draft.id, {
+      fileName: "logo.pdf",
+      contentType: "application/pdf",
+      size: 1000,
+    });
+    await api.completeArtworkUpload(draft.id, upload.fileId);
+    await api.updateOrderDraft(draft.id, {
+      payer: { orgId: DEMO_ORG_IDS.kora, legalAddress: "Москва, ул. Лесная, 9" },
+      paymentMethod: "escrow_split_50_50",
+    });
+    const submitted = await api.submitOrder(
+      draft.id,
+      { offerAccepted: true, offerVersion: "2026-10-01" },
+      "submit-split",
+    );
+    const id = submitted.order.id;
+    expect(submitted.payment.invoiceNumber).toBe(`${String(id)}-1-СЧ`);
+    expect(submitted.payment.purpose).toBe(
+      `Оплата по заказу № ${String(id)}, спецификация ${String(id)}-С, платёж 1 из 2. Без НДС`,
+    );
+    expect(submitted.payment.amountDue).toBe(TOTAL / 2);
+
+    // до «готов к отгрузке» второй транш без срока
+    as(OPERATOR);
+    const firstRow = (await api.getAdminFinance()).tranches.find(
+      (row) => row.orderId === id && row.trancheNo === 1,
+    );
+    await api.confirmTrancheFunds(firstRow?.trancheId ?? "", {}, "funds-split-1");
+    as(CUSTOMER);
+    const deal = await api.getOrderEscrow(id);
+    expect(deal.tranches).toHaveLength(2);
+    expect(deal.tranches[1]).toMatchObject({
+      title: "Второй транш · перед отгрузкой",
+      status: "awaiting_funds",
+      dueAt: null,
+    });
+    expect(deal.finalPayment).toMatchObject({ state: "not_issued", invoiceNumber: null });
+
+    as(FACTORY);
+    await api.confirmSellerOrder(id, "confirm-split");
+    await api.advanceSellerStage(id, { command: "start_artwork_review" });
+    await api.advanceSellerStage(id, { command: "approve_artwork" });
+    as(CUSTOMER);
+    await api.approveArtwork(id);
+    as(FACTORY);
+    await api.advanceSellerStage(id, { command: "materials_purchased" });
+    const qc = await api.advanceSellerStage(id, { command: "start_quality_control" });
+    // второй транш не оплачен — `ship` нет, а прямая команда — 409
+    expect(qc.availableCommands).not.toContain("ship");
+    expect((await problemOf(() => api.advanceSellerStage(id, { command: "ship" }))).type).toBe(
+      "https://partiya.ru/problems/orders/ship-before-final-payment",
+    );
+
+    as(CUSTOMER);
+    const issued = await api.getOrderEscrow(id);
+    expect(issued.tranches[1]?.dueAt).not.toBeNull();
+    // Q-384: второй счёт с реквизитами — в карточке эскроу заказчика
+    expect(issued.finalPayment?.state).toBe("awaiting");
+    expect(issued.finalPayment?.instructions).toMatchObject({
+      invoiceNumber: `${String(id)}-2-СЧ`,
+      amountDue: TOTAL / 2,
+      purpose: `Оплата по заказу № ${String(id)}, спецификация ${String(id)}-С, платёж 2 из 2. Без НДС`,
+    });
+
+    as(OPERATOR);
+    const second = (await api.getAdminFinance()).tranches.find(
+      (row) => row.orderId === id && row.trancheNo === 2,
+    );
+    expect(second?.reference).toBe(
+      `Оплата по заказу № ${String(id)}, спецификация ${String(id)}-С, платёж 2 из 2. Без НДС`,
+    );
+    await api.confirmTrancheFunds(second?.trancheId ?? "", {}, "funds-split-2");
+
+    as(FACTORY);
+    expect((await api.getSellerOrder(id)).availableCommands).toContain("ship");
+  });
+
+  it("оператор отмечает «Доставлено» запасным путём; не shipped — 409", async () => {
+    as(OPERATOR);
+    expect((await problemOf(() => api.markAdminOrderDelivered(4799))).status).toBe(409);
+    expect((await problemOf(() => api.markAdminOrderDelivered(999_999))).status).toBe(404);
   });
 
   it("подтверждение и отклонение идемпотентны и проверяют статус", async () => {
@@ -511,5 +653,119 @@ describe("план мощности", () => {
     expect(cell?.unitsTotal).toBe(4000);
     expect(cell?.freeUnits).toBe(4000);
     expect(cell?.freePct).toBe(100);
+  });
+});
+
+/* ───────────── просрочка второго транша 50/50 (Q-401, вариант «в») ───────────── */
+
+describe("просроченный второй транш", () => {
+  /** Фикстура: 50/50, первый срок второго транша истёк 3 дня назад — после автопродления
+      на 48 ч заказ у оператора. */
+  const OVERDUE = 4795;
+
+  it("первая просрочка — автопродление, повторная — очередь оператора; завод видит состояние", async () => {
+    as(OPERATOR);
+    const page = await api.listAdminOverdueTranches();
+    expect(page.count).toBe(1);
+    const row = page.items[0];
+    expect(row).toMatchObject({
+      orderNo: OVERDUE,
+      invoiceNumber: `${String(OVERDUE)}-2-СЧ`,
+      extensions: 1,
+    });
+    expect(row?.history.map((item) => item.kind)).toEqual(["auto"]);
+    expect((await api.getAdminOverdueTrancheCount()).count).toBe(1);
+
+    as(FACTORY);
+    const card = await api.getSellerOrder(OVERDUE);
+    expect(card.finalPayment?.state).toBe("operator");
+    expect(card.finalPayment?.instructions).toBeNull();
+    expect(card.availableCommands).not.toContain("ship");
+
+    // журнал рассказывает про продление и передачу оператору
+    const events = (await api.getOrderEvents(OVERDUE)).items.map((event) => event.title);
+    expect(events.some((title) => title.startsWith("Срок оплаты второго транша продлён до"))).toBe(
+      true,
+    );
+    expect(events.some((title) => title.includes("передан оператору"))).toBe(true);
+  });
+
+  it("«Продлить» проверяет часы и комментарий, снимает заказ из очереди, без второго автопродления", async () => {
+    as(OPERATOR);
+    for (const body of [
+      { hours: 0, comment: "ок" },
+      { hours: 337, comment: "ок" },
+      { hours: 24, comment: "  " },
+    ]) {
+      const problem = await problemOf(() => api.extendAdminOverdueTranche(OVERDUE, body));
+      expect(problem.status).toBe(422);
+    }
+    const done = await api.extendAdminOverdueTranche(OVERDUE, {
+      hours: 72,
+      comment: "ПП отправлено, ждём зачисления",
+    });
+    expect(done.outcome).toBe("extended");
+    expect(done.dueAt).toBe(new Date(clock + 72 * 3_600_000).toISOString());
+    expect((await api.getAdminOverdueTrancheCount()).count).toBe(0);
+    // повторно — уже не у оператора
+    expect(
+      (await problemOf(() => api.extendAdminOverdueTranche(OVERDUE, { hours: 1, comment: "ещё" })))
+        .type,
+    ).toBe("https://partiya.ru/problems/payments/tranche-not-overdue");
+
+    as(FACTORY);
+    expect((await api.getSellerOrder(OVERDUE)).finalPayment).toMatchObject({
+      state: "extended",
+      extensions: 2,
+    });
+
+    // срок снова прошёл — сразу оператору
+    tick(73 * 3_600_000);
+    as(OPERATOR);
+    expect((await api.getAdminOverdueTrancheCount()).count).toBe(1);
+  });
+
+  it("оплата до решения оператора принимается штатно, решение после неё — 409", async () => {
+    as(OPERATOR);
+    await api.listAdminOverdueTranches();
+    await api.confirmTrancheFunds(`tr-${String(OVERDUE)}-2`, {}, "funds-late");
+    expect((await api.getAdminOverdueTrancheCount()).count).toBe(0);
+    expect(
+      (await problemOf(() => api.openAdminOverdueDispute(OVERDUE, { comment: "поздно" }))).type,
+    ).toBe("https://partiya.ru/problems/payments/tranche-already-paid");
+
+    as(FACTORY);
+    const card = await api.getSellerOrder(OVERDUE);
+    expect(card.finalPayment?.state).toBe("paid");
+    expect(card.availableCommands).toContain("ship");
+  });
+
+  it("«Открыть спор»: счёт снят, первый транш делит решение по спору", async () => {
+    as(OPERATOR);
+    expect(
+      (await problemOf(() => api.openAdminOverdueDispute(OVERDUE, { comment: " " }))).status,
+    ).toBe(422);
+    const done = await api.openAdminOverdueDispute(OVERDUE, {
+      comment: "Заказчик не выходит на связь",
+    });
+    expect(done).toMatchObject({ outcome: "dispute_opened", disputeId: `dsp-${String(OVERDUE)}` });
+    expect((await api.getAdminOverdueTrancheCount()).count).toBe(0);
+
+    // снятый счёт не оплатить
+    expect(
+      (await problemOf(() => api.confirmTrancheFunds(`tr-${String(OVERDUE)}-2`, {}, "late")))
+        .status,
+    ).toBe(409);
+
+    const card = await api.getAdminDispute(OVERDUE);
+    // в эскроу — только первый транш
+    expect(card.escrowAmount).toBe(13_500_000);
+    const full = card.options.find((option) => option.resolution === "full_refund");
+    expect(full?.customerAmount).toBe(13_500_000);
+
+    as(FACTORY);
+    const seller = await api.getSellerOrder(OVERDUE);
+    expect(seller.status).toBe("dispute");
+    expect(seller.finalPayment?.state).toBe("cancelled");
   });
 });

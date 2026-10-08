@@ -56,7 +56,30 @@ test("SEO: без JS отдаётся слепок, с JS карточка не 
 
 /* ── (f) промокод ─────────────────────────────────────────────────────────── */
 
-test("промокод ПАРТИЯ5 снимает 5 % в сводке оформления", async ({ page }) => {
+/* Промокоды выключены продуктовым решением: поле скрыто флагом `features.promoCodes`
+   конфига фронта (по умолчанию выключен), бэк на любой код отвечает 422
+   `quote/unknown_promo`. Проверяем, что в оформлении поля нет. */
+test("промокоды выключены: поля «Промокод» в оформлении нет", async ({ page }) => {
+  test.slow();
+  const main = page.locator("main");
+  await registerCustomer(page, freshPhone("914"), validInn(), "ООО «Промо e2e»");
+
+  await page.goto(OFFER_PATH);
+  await page.getByLabel("Объём, шт").fill("1000");
+  await page.getByLabel("Объём, шт").press("Enter");
+  const checkout = page.getByRole("link", { name: /Оформить партию/u });
+  await expect(checkout).toHaveAttribute("href", /qty=1000\b/u, { timeout: 30_000 });
+  await checkout.click();
+  await page.waitForURL(/\/order\/new\?/u);
+
+  const summary = main.getByRole("complementary", { name: "Сводка заказа" });
+  expect(await totalOf(summary), "сводка посчитана").toBeGreaterThan(0);
+  await expect(main.getByLabel("Промокод")).toHaveCount(0);
+});
+
+/* Старый сценарий: работает, только если включить `features.promoCodes` в конфиге
+   и промокоды на бэке. Оставлен пропущенным как образец на случай включения. */
+test.skip("промокод ПАРТИЯ5 снимает 5 % в сводке оформления", async ({ page }) => {
   test.slow();
   const main = page.locator("main");
   await registerCustomer(page, freshPhone("914"), validInn(), "ООО «Промо e2e»");
@@ -107,14 +130,10 @@ async function amountOf(summary: Locator, label: RegExp): Promise<number> {
 
 /* ── (e) повтор партии ────────────────────────────────────────────────────── */
 
-/* ДЕФЕКТ, не доведён (Q-333). Кнопка обязана читаться «Повторить −9 %»: контракт
-   говорит про `Order.repeatDiscountPercent` — «скидка за повтор У ЭТОЙ ФАБРИКИ».
-   Бэкенд кладёт туда скидку, УЖЕ применённую к этому заказу, а у первой партии её
-   нет, и экран показывает «−0 %». Чинится на бэкенде: поле надо брать из карточки
-   предложения (`catalog.offer_versions.repeat_discount_percent`, у оффера 2231 — 9),
-   а не из снимка котировки. Тест оставлен включённым через `fixme`: он падает ровно
-   на том месте, где дефект, и станет зелёным сам, когда поле начнут заполнять. */
-test.fixme("повтор принятой партии идёт со скидкой −9 %", async ({ page }) => {
+/* Q-333 закрыт на бэкенде: `Order.repeatDiscountPercent` — скидка за повтор у этой
+   фабрики из карточки предложения (у оффера 2231 — 9 %), а не уже применённая к
+   заказу. Кнопка читается «Повторить −9 %». */
+test("повтор принятой партии идёт со скидкой −9 %", async ({ page }) => {
   test.slow();
   const main = page.locator("main");
   const customerPhone = freshPhone("913");

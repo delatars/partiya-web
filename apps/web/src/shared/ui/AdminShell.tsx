@@ -3,7 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 
-import { adminOverviewOptions } from "@/shared/api";
+import {
+  adminOverdueTrancheCountOptions,
+  adminOverviewOptions,
+  adminStuckCountOptions,
+} from "@/shared/api";
 import { useLogout, useSession } from "@/shared/lib/session";
 import { RouterLink, useAppNavigate } from "@/shared/ui/router-link";
 
@@ -11,6 +15,11 @@ import { RouterLink, useAppNavigate } from "@/shared/ui/router-link";
 
    Счётчики берутся из `GET /admin/overview` — той же выборки, что рисует плитки обзора.
    Константы в меню («7») врали бы на второй день работы. */
+
+/** Псевдо-очередь меню: её счётчик берётся из `GET /admin/stuck/count`. */
+const STUCK_QUEUE = "stuck";
+/** Псевдо-очередь «Просроченные транши» (Q-401): счётчик — `GET /admin/overdue-tranches/count`. */
+const OVERDUE_QUEUE = "overdue-tranches";
 
 const GROUPS = [
   {
@@ -20,6 +29,10 @@ const GROUPS = [
       { label: "Модерация", href: "/admin/moderation", queue: "offers" },
       { label: "Споры", href: "/admin/disputes", queue: "disputes" },
       { label: "Финансы и сверка", href: "/admin/finance", queue: "payments" },
+      { label: "Просроченные транши", href: "/admin/overdue-tranches", queue: OVERDUE_QUEUE },
+      { label: "Доставка", href: "/admin/delivery", queue: null },
+      // п. 35: бейдж — `GET /admin/stuck/count`, а не очередь обзора (Q-374)
+      { label: "Зависшие", href: "/admin/stuck", queue: STUCK_QUEUE },
     ],
   },
   {
@@ -41,9 +54,24 @@ export function AdminShell({ children }: { children?: ReactNode }) {
     enabled: session.isOperator,
   });
 
+  const { data: stuck } = useQuery({
+    ...adminStuckCountOptions(),
+    enabled: session.isOperator,
+  });
+
+  const { data: overdue } = useQuery({
+    ...adminOverdueTrancheCountOptions(),
+    enabled: session.isOperator,
+  });
+
   const countOf = (key: string | null): number | undefined => {
     if (key === null) return undefined;
-    const count = overview?.queues.find((queue) => queue.key === key)?.count;
+    const count =
+      key === STUCK_QUEUE
+        ? stuck?.total
+        : key === OVERDUE_QUEUE
+          ? overdue?.count
+          : overview?.queues.find((queue) => queue.key === key)?.count;
     return count === undefined || count === 0 ? undefined : count;
   };
 

@@ -24,7 +24,11 @@ import {
 } from "@/shared/lib/roles";
 import { useRevokeAuthSession, useSession } from "@/shared/lib/session";
 
+import { RequisitesForm } from "../components/RequisitesForm";
+
 /* Макет: экран account.company — реквизиты, сотрудники, таблица «Что может каждая роль».
+   Реквизиты (ОГРН, адрес, банк — п. 24) редактируются формой `RequisitesForm` у владельца
+   и бухгалтера; остальным ролям форма не показывается (бэк ответил бы 403).
    Вкладка «Безопасность» в макете не нарисована, но `GET /me/sessions` и отзыв сеанса на
    бэке есть и без интерфейса бесполезны — она здесь (см. отчёт, Q-A3). */
 
@@ -118,9 +122,6 @@ function DetailsTab({ org }: { org: NonNullable<ReturnType<typeof useSession>["a
           <Field label="ИНН">
             <Input readOnly numeric value={org.inn} />
           </Field>
-          <Field label="КПП">
-            <Input readOnly numeric value={org.kpp ?? "—"} />
-          </Field>
           <Field label="Вид на платформе">
             <Input readOnly value={KIND_TITLE[org.kind]} />
           </Field>
@@ -128,10 +129,14 @@ function DetailsTab({ org }: { org: NonNullable<ReturnType<typeof useSession>["a
             <Input readOnly value={new Date(org.createdAt).toLocaleDateString("ru-RU")} />
           </Field>
         </div>
-        <Alert kind="info" className="mt-3.5" title="Банковские реквизиты добавим позже">
-          ОГРН, адрес и расчётный счёт бэк пока не хранит: в контракте организации только
-          наименование, ИНН, КПП и статус проверки.
-        </Alert>
+        {can(org.role, "manage_requisites") ? (
+          <RequisitesForm orgId={org.id} inn={org.inn} />
+        ) : (
+          <Alert kind="info" className="mt-3.5" title="Банковские реквизиты скрыты">
+            ОГРН, юридический адрес и расчётный счёт видят и меняют только владелец и бухгалтер
+            компании. КПП: {org.kpp ?? "—"}.
+          </Alert>
+        )}
       </Box>
 
       <Box>

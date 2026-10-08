@@ -35,7 +35,7 @@ export CARGO_TARGET_DIR=$HOME/.cache/partiya-target
 export DATABASE_URL=postgres://postgres:dev@127.0.0.1:55442/partiya
 
 cargo run -p partiya-api -- migrate
-cargo run -p partiya-api -- seed   # 8 категорий, 10 заводов, 30 офферов, промокод ПАРТИЯ5
+cargo run -p partiya-api -- seed   # 26 категорий (24 корня), 9 заводов, 28 офферов, промокод ПАРТИЯ5
 ```
 
 ### 3. Сотрудник завода № 17 (Q-321)

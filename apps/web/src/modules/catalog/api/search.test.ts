@@ -25,7 +25,9 @@ describe("категории и текст", () => {
     const child = search({ category: "tekstil/futbolki" }).total;
     expect(child).toBeGreaterThan(0);
     expect(parent).toBeGreaterThan(child);
-    expect(search({ category: "svechi" }).total).toBe(2);
+    expect(search({ category: "tekstil/sumki" }).total).toBe(2);
+    // убранная категория (Q-415) — как любая неизвестная: пусто
+    expect(search({ category: "svechi" }).total).toBe(0);
   });
 
   it("поиск идёт по названию, фабрике и материалу", () => {

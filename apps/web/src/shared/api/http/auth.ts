@@ -4,7 +4,9 @@ import type {
   CreateOrgBody,
   Me,
   Organization,
+  OrgRequisites,
   RequestCodeBody,
+  UpdateOrgRequisitesBody,
   VerifyCodeBody,
 } from "@partiya/api-contracts";
 
@@ -38,6 +40,16 @@ export function createAuthHttpApi(client: HttpClient): AuthApi {
     },
     createOrg(body: CreateOrgBody): Promise<Organization> {
       return client.post<Organization>("/orgs", { body });
+    },
+    getOrgRequisites(orgId: string, signal?: AbortSignal): Promise<OrgRequisites> {
+      return client.get<OrgRequisites>(`/orgs/${encodeURIComponent(orgId)}/requisites`, {
+        signal,
+      });
+    },
+    updateOrgRequisites(orgId: string, body: UpdateOrgRequisitesBody): Promise<OrgRequisites> {
+      return client.request<OrgRequisites>("PUT", `/orgs/${encodeURIComponent(orgId)}/requisites`, {
+        body,
+      });
     },
   };
 }

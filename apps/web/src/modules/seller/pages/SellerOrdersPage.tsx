@@ -88,6 +88,9 @@ export function SellerOrdersPage() {
         return summary.qualityControl;
       case "shipped":
         return summary.shipped;
+      case "accepted":
+        // Q-335: поле новое — у старого бэка его нет, вкладка тогда пустая, а не сломанная
+        return summary.accepted ?? 0;
       case "paid_out":
         return summary.paidOut;
     }

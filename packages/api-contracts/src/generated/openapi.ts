@@ -203,6 +203,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/overdue-tranches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Просроченные вторые транши 50/50
+         * @description Счета второго транша, не оплаченные и после автоматического продления на 48 ч (Q-401). Заказ стоит на контроле качества: отгрузка без полной оплаты запрещена. Дольше всех ждущие — первыми.
+         */
+        get: operations["adminListOverdueTranches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/overdue-tranches/{orderNo}/dispute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Открыть спор от имени платформы
+         * @description Неоплаченный второй счёт снимается, заказ `quality_control → dispute`. В эскроу — первый транш; его делит обычное решение по спору (`POST /admin/disputes/{id}/resolve`): отказ — заводу, полный или частичный возврат — заказчику. Комментарий обязателен. Счёт успели оплатить — 409 `payments/tranche-already-paid`.
+         */
+        post: operations["adminOpenOverdueDispute"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/overdue-tranches/{orderNo}/extend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Продлить срок оплаты второго транша
+         * @description Тот же счёт (номер и назначение платежа не меняются, Q-420) получает срок «сейчас + hours». Комментарий обязателен; действие пишется в историю сроков счёта и аудит-лог той же транзакцией, сторонам — строка журнала заказа и уведомление. Если счёт успели оплатить — 409 `payments/tranche-already-paid`, заказ уже продолжает путь.
+         */
+        post: operations["adminExtendOverdueTranche"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/overdue-tranches/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Счётчик просроченных траншей для бейджа */
+        get: operations["adminOverdueTranchesCount"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/overview": {
         parameters: {
             query?: never;
@@ -329,7 +406,7 @@ export interface paths {
         get: operations["adminRanking"];
         /**
          * Применить веса ранжирования
-         * @description Пересчитывает `popularity_score` всех опубликованных предложений в той же транзакции: экран «Популярные» обязан совпасть с весами сразу, а не через сутки.
+         * @description Набор весов полный: каждый фактор из `GET /admin/ranking` ровно один раз, вес — целое 0..100, сумма ровно 100. Пересчитывает `popularity_score` всех опубликованных предложений в той же транзакции: экран «Популярные» обязан совпасть с весами сразу, а не через сутки. Веса «до» и «после» уходят в аудит-лог (`ranking.update`).
          */
         put: operations["adminUpdateRanking"];
         post?: never;
@@ -353,6 +430,100 @@ export interface paths {
          * @description Ничего не сохраняет: оператор двигает вес и сразу видит, что поменяется местами.
          */
         post: operations["adminRankingPreview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/stuck": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Зависшие задания и события
+         * @description Мёртвые задания (`jobs`, попытки исчерпаны) и события `outbox`/`inbox`, не обработанные дольше минуты. Новые сверху, курсорная пагинация.
+         */
+        get: operations["adminListStuck"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/stuck/{kind}/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Карточка зависшего: ошибка, payload, история действий */
+        get: operations["adminStuckCard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/stuck/{kind}/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отметить решённым
+         * @description Строка уходит из очереди без выполнения: событие **не дойдёт** до подписчиков, задание не выполнится. Обоснование обязательно и пишется в аудит-лог той же транзакцией.
+         */
+        post: operations["adminStuckResolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/stuck/{kind}/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Повторить
+         * @description Задание получает ровно одну попытку прямо сейчас (упадёт снова — вернётся в список с новой ошибкой); событие и webhook берутся воркером немедленно. Действие уходит в аудит-лог той же транзакцией.
+         */
+        post: operations["adminStuckRetry"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/stuck/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Счётчик зависших для бейджа */
+        get: operations["adminStuckCount"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1076,9 +1247,31 @@ export interface paths {
         put?: never;
         /**
          * Согласовать макет и цветопробу
-         * @description Команда `ApproveArtwork` автомата: `artwork_review → materials` (5.2). Подаёт только заказчик (Q-02).
+         * @description Подпись заказчика под макетом (визуал). Макет согласуют обе стороны (решение п. 16): технолог завода — производимость (`POST /seller/orders/{id}/stage` с `approve_artwork`), заказчик — визуал. Первая подпись только записывается (`artworkSignoff`), вторая переводит заказ `artwork_review → materials`. Повторная подпись — без изменений.
          */
         post: operations["approveArtwork"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orders/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отменить заказ до оплаты
+         * @description Команда `CancelByCustomer` автомата: `draft → cancelled` и `awaiting_payment → cancelled` (решение п. 17). У неоплаченного заказа в той же транзакции снимаются неоплаченные счета и мягкий резерв мощности; причина уходит в журнал.
+         *
+         *     После оплаты (хоть копейка в эскроу или заказ дальше `awaiting_payment`) — 409 `/problems/orders/cancel-after-payment`: такую отмену проводит только оператор. Повтор по уже отменённому заказу — 200 без изменений.
+         */
+        post: operations["cancelOrder"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1358,6 +1551,10 @@ export interface paths {
          * @description Требует `Idempotency-Key`. Повтор с тем же ключом возвращает первый ответ, а не заводит вторую сделку; другой ключ на уже оформленном заказе — 409 `/problems/orders/not-draft`.
          *
          *     В одной транзакции: проверка полноты → переход `draft → awaiting_payment` → открытие эскроу-сделки в `payments` → документы → журнал → outbox. Таймер оплаты ставит `payments` вместе со счётом.
+         *
+         *     Принятие оферты обязательно (решение п. 12): `offerAccepted: true` и `offerVersion`. Время принятия ставит сервер, IP и браузер берутся из заголовков; запись — в БД и строкой в журнал заказа (без IP). Без принятия — 422 `/problems/orders/offer-not-accepted`.
+         *
+         *     Мощность — «мягкий режим» (п. 20): нет плана на неделю → заказ проходит без резерва; план есть и перегружен → 409 `/problems/orders/capacity-unavailable`.
          */
         post: operations["submitOrder"];
         delete?: never;
@@ -1399,6 +1596,30 @@ export interface paths {
          */
         get: operations["getOrg"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{id}/requisites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Реквизиты организации
+         * @description ОГРН/ОГРНИП, КПП, юридический адрес и банковский счёт. Видны только владельцу и бухгалтеру (решение продукта п.24). Остальным ролям и не участникам — `403`, одинаковый: по коду не узнать, существует ли организация.
+         */
+        get: operations["getOrgRequisites"];
+        /**
+         * Изменить реквизиты организации
+         * @description Реквизиты целиком: не присланное поле стирается. Проверяются контрольные суммы ОГРН/ОГРНИП (длина — по виду ИНН), ключ расчётного и корреспондентского счёта по БИК; КПП у ИП запрещён. Ошибки — `422` `orgs/requisites-invalid` со списком по полям (`ogrn`, `kpp`, `legalAddress`, `bank.bankName`, `bank.bik`, `bank.account`, `bank.correspondentAccount`). Заказы держат снимок реквизитов плательщика и задним числом не меняются.
+         */
+        put: operations["updateOrgRequisites"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1997,6 +2218,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/seller/orders/{id}/delivered": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Отметить «Доставлено» по трек-номеру
+         * @description Решение п. 13: доставку фиксирует завод по трек-номеру перевозчика; `POST /admin/orders/{id}/delivered` оператора остаётся запасным путём. Переход `shipped → acceptance` (команда `MarkDelivered`), открывается окно приёмки (5 рабочих дней) и ставится таймер авто-приёмки — как у оператора.
+         *
+         *     Деньги отметка не двигает: их раскрывает только приёмка заказчика или истечение окна. Заказчик получает уведомление в ленте (`orders.status_changed`) и строку журнала с трек-номером (SSE).
+         *
+         *     Доступно, когда в карточке `canMarkDelivered = true`. Не `shipped` — 409 `seller/transition-not-allowed`; пустой или длиннее 64 символов номер — 422 `seller/invalid-tracking-number`.
+         */
+        post: operations["markSellerOrderDelivered"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/seller/orders/{id}/dispute/reply": {
         parameters: {
             query?: never;
@@ -2092,7 +2337,7 @@ export interface paths {
         put?: never;
         /**
          * Шаг производства
-         * @description Переходы автомата, которые подаёт завод: `start_artwork_review`, `materials_purchased`, `start_quality_control`, `ship`. Какой переход из какого статуса возможен, решает домен — недопустимый даёт 409 `seller/transition-not-allowed`, а не тихий no-op.
+         * @description Переходы автомата, которые подаёт завод: `start_artwork_review`, `approve_artwork` (подпись технолога под макетом — производимость, п. 16; заказ уходит в `materials`, когда подписал и заказчик), `materials_purchased`, `start_quality_control`, `ship`. Какой переход из какого статуса возможен, решает домен — недопустимый даёт 409 `seller/transition-not-allowed`, а не тихий no-op.
          *
          *     Какие команды доступны прямо сейчас, говорит `availableCommands` карточки: список собирается из того же автомата.
          */
@@ -2513,13 +2758,97 @@ export interface components {
             urgent: boolean;
             waiting: string;
         };
+        /** @description Ответ на «Продлить» и «Открыть спор». */
+        AdminOverdueActionResult: {
+            /** @description Открытый спор (у спора) — карточка в `/admin/disputes`. */
+            disputeId: string | null;
+            /** @description Новый срок оплаты (у продления). */
+            dueAt: string | null;
+            /** Format: int32 */
+            orderNo: number;
+            outcome: components["schemas"]["AdminOverdueOutcome"];
+        };
+        /** @description Тело «Открыть спор». */
+        AdminOverdueDisputeBody: {
+            /** @description Обоснование — обязательно, видно обеим сторонам в журнале заказа. */
+            comment: string;
+        };
+        /** @description Тело «Продлить». */
+        AdminOverdueExtendBody: {
+            /** @description Обоснование — обязательно: оно уходит в аудит, журнал заказа и уведомления. */
+            comment: string;
+            /**
+             * Format: int32
+             * @description На сколько часов от «сейчас», 1..=336.
+             * @example 48
+             */
+            hours: number;
+        };
+        /**
+         * @description Чем закончилось действие оператора.
+         * @enum {string}
+         */
+        AdminOverdueOutcome: "extended" | "dispute_opened";
+        /** @description Строка очереди «Просроченные транши». */
+        AdminOverdueTranche: {
+            /**
+             * Format: int64
+             * @description Сумма второго транша.
+             */
+            amount: number;
+            customerName: string;
+            /** @description Последний (просроченный) срок оплаты. */
+            dueAt: string;
+            /**
+             * Format: int32
+             * @description Сколько раз продлевали срок.
+             */
+            extensions: number;
+            factoryName: string;
+            /**
+             * Format: int64
+             * @description Сколько уже в эскроу (первый транш) — это и будет делить спор.
+             */
+            heldAmount: number;
+            /** @description История сроков, старые первыми. */
+            history: components["schemas"]["AdminTrancheExtension"][];
+            /** @description Номер второго счёта строкой как есть («4813-2-СЧ»). */
+            invoiceNumber: string;
+            /**
+             * Format: int32
+             * @description Публичный номер заказа — им же ходят действия.
+             */
+            orderNo: number;
+            /** @description «Футболка базовая, 500 шт». */
+            orderTitle: string;
+            /** @description Когда счёт ушёл к оператору. */
+            overdueSince: string;
+        };
+        /** @description `GET /admin/overdue-tranches/count`. */
+        AdminOverdueTrancheCount: {
+            /** Format: int64 */
+            count: number;
+        };
+        /** @description `GET /admin/overdue-tranches`. */
+        AdminOverdueTranchePage: {
+            /**
+             * Format: int64
+             * @description Сколько всего в очереди (бейдж).
+             */
+            count: number;
+            items: components["schemas"]["AdminOverdueTranche"][];
+        };
         AdminOverview: {
             alerts: components["schemas"]["AdminAlert"][];
             /** Format: int64 */
             escrowOrders: number;
             /** Format: int64 */
             escrowTotal: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Комиссия площадки, проведённая журналом в этом календарном месяце: только
+             *     с товара, без доставки (DECISIONS.md, п. 2), по закрытым сделкам.
+             */
             feeMonth: number;
             /** Format: int64 */
             gmvDeltaPct: number | null;
@@ -2570,10 +2899,123 @@ export interface components {
             pct: number;
             title: string;
         };
+        /** @description Действие оператора над строкой (из аудит-лога). */
+        AdminStuckAction: {
+            /** @description `stuck.retry` | `stuck.resolve`. */
+            action: string;
+            /** @description Подпись оператора (почта или телефон). */
+            actorRef: string;
+            at: string;
+            comment: string | null;
+        };
+        /** @description Тело «Повторить» и «Отметить решённым». */
+        AdminStuckActionBody: {
+            /** @description Обоснование. Для «Отметить решённым» обязательно, для «Повторить» — нет. */
+            comment?: string | null;
+        };
+        /** @description `GET /admin/stuck/{kind}/{id}` — карточка. */
+        AdminStuckCard: {
+            /** @description Действия операторов над строкой, новые сверху. */
+            actions: components["schemas"]["AdminStuckAction"][];
+            /** @description Можно ли «Отметить решённым». */
+            canResolve: boolean;
+            /** @description Можно ли «Повторить» прямо сейчас. */
+            canRetry: boolean;
+            /** @description Какой воркер держит задание (только у `running`). */
+            lockedBy: string | null;
+            /** @description Payload как лежит в очереди. Подпись webhook-а не отдаётся. */
+            payload: Record<string, never>;
+            /** @description Строка целиком; `lastError` — полный текст. */
+            row: components["schemas"]["AdminStuckRow"];
+        };
+        /** @description Счётчики «Зависших» — бейдж в меню бэк-офиса и вкладки экрана. */
+        AdminStuckCount: {
+            /**
+             * Format: int64
+             * @description Webhook-и, не обработанные дольше минуты.
+             */
+            inbox: number;
+            /**
+             * Format: int64
+             * @description Мёртвые задания.
+             */
+            jobs: number;
+            /**
+             * Format: int64
+             * @description События, не разосланные дольше минуты.
+             */
+            outbox: number;
+            /** Format: int64 */
+            total: number;
+        };
+        /**
+         * @description Очередь, из которой строка.
+         * @enum {string}
+         */
+        AdminStuckKind: "job" | "outbox" | "inbox";
+        /** @description `GET /admin/stuck`. */
+        AdminStuckPage: {
+            /** @description Счётчики по очередям без учёта фильтров — для вкладок. */
+            counts: components["schemas"]["AdminStuckCount"];
+            items: components["schemas"]["AdminStuckRow"][];
+            /** @description Курсор следующей страницы; `null` — дальше ничего нет. */
+            nextCursor: string | null;
+        };
+        /** @description Строка ленты «Зависшие». */
+        AdminStuckRow: {
+            /**
+             * Format: int32
+             * @description Потрачено попыток.
+             */
+            attempts: number;
+            /** @description Когда строка появилась в очереди, RFC 3339. */
+            createdAt: string;
+            /** Format: uuid */
+            id: string;
+            kind: components["schemas"]["AdminStuckKind"];
+            /** @description Последняя ошибка. В ленте — первые 300 символов, в карточке — целиком. */
+            lastError: string | null;
+            /**
+             * Format: int32
+             * @description Лимит попыток задания; у событий и webhook-ов лимита нет — `null`.
+             */
+            maxAttempts: number | null;
+            /** @description Когда воркер возьмёт строку снова; `null` — не возьмёт. */
+            nextAttemptAt: string | null;
+            resolvedAt: string | null;
+            status: components["schemas"]["AdminStuckStatus"];
+            /** @description Агрегат события (`order:<uuid>`) или id webhook-а у отправителя; у задания — `null`. */
+            subject: string | null;
+            /**
+             * @description Тип задания (`order.confirm_deadline`), тип события (`order.status_changed`)
+             *     или отправитель webhook-а (`bank`).
+             * @example order.confirm_deadline
+             */
+            type: string;
+        };
+        /**
+         * @description Состояние строки.
+         * @enum {string}
+         */
+        AdminStuckStatus: "dead" | "pending" | "running" | "done" | "resolved";
         AdminTaxonomy: {
             selected: null | components["schemas"]["TaxonomyCategory"];
             tree: components["schemas"]["TaxonomyNode"][];
         };
+        /** @description Строка истории сроков счёта. */
+        AdminTrancheExtension: {
+            at: string;
+            /** @description Обоснование оператора; у автопродления — `null`. */
+            comment: string | null;
+            dueAt: string;
+            kind: components["schemas"]["AdminTrancheExtensionKind"];
+            previousDueAt: string;
+        };
+        /**
+         * @description Как продлили срок счёта.
+         * @enum {string}
+         */
+        AdminTrancheExtensionKind: "auto" | "manual";
         /** @description Строка очереди оператора: счёт, который ждёт денег. */
         AdminTrancheRow: {
             /**
@@ -2587,6 +3029,13 @@ export interface components {
             dealNo: number;
             /** Format: date-time */
             dueAt: string;
+            /**
+             * Format: int64
+             * @description Публичный номер заказа — по нему оператор узнаёт платёж и переходит в заказ
+             *     (DECISIONS.md, п. 6; поле `orderId` контракта `backoffice.ts`). `null` — сделка
+             *     по образцу или открыта до миграции 0021.
+             */
+            orderId: number | null;
             /** @description Срок оплаты уже прошёл. */
             overdue: boolean;
             /** Format: uuid */
@@ -2608,8 +3057,8 @@ export interface components {
         /** @description Тело `POST /seller/orders/{id}/stage` — шаг производства по автомату. */
         AdvanceStageBody: {
             /**
-             * @description Команда автомата: `start_artwork_review`, `materials_purchased`,
-             *     `start_quality_control`, `ship`.
+             * @description Команда автомата: `start_artwork_review`, `approve_artwork` (подпись технолога
+             *     под макетом, п. 16), `materials_purchased`, `start_quality_control`, `ship`.
              */
             command: string;
         };
@@ -2623,6 +3072,16 @@ export interface components {
              * @description Максимальный размер одного файла, байты.
              */
             maxSize: number;
+        };
+        /**
+         * @description Подписи сторон под макетом печати (решение п. 16): заказ уходит в `materials`
+         *     только после обеих.
+         */
+        ArtworkSignoff: {
+            /** @description Заказчик согласовал визуал; `null` — ещё нет. */
+            customerApprovedAt: string | null;
+            /** @description Технолог завода согласовал производимость; `null` — ещё нет. */
+            factoryApprovedAt: string | null;
         };
         /**
          * @description Состояние файла макета печати.
@@ -2669,6 +3128,11 @@ export interface components {
          * @enum {string}
          */
         AuditCheckStateName: "ok" | "work" | "todo";
+        /** @description Тело `POST /orders/{id}/cancel` (решение п. 17). */
+        CancelOrderBody: {
+            /** @description Причина — уходит в журнал заказа (до 500 символов). */
+            reason?: string | null;
+        };
         /** @description Ячейка «линия × неделя». */
         CapacityCell: {
             /** Format: int64 */
@@ -3257,6 +3721,7 @@ export interface components {
             blockedByDisputeId?: string | null;
             /** Format: int64 */
             factoryPayout: number;
+            finalPayment: null | components["schemas"]["FinalPayment"];
             /** Format: int64 */
             heldAmount: number;
             id: string;
@@ -3637,6 +4102,36 @@ export interface components {
             specialization: string | null;
             specializationKey: null | components["schemas"]["SpecializationName"];
         };
+        /** @description Второй транш 50/50 в форме экрана — карточка эскроу заказчика и кабинет завода. */
+        FinalPayment: {
+            /** Format: int64 */
+            amount: number;
+            /** @description Текущий срок оплаты, RFC 3339. */
+            dueAt: string | null;
+            /**
+             * Format: int32
+             * @description Сколько раз продлевали срок.
+             */
+            extensions: number;
+            instructions: null | components["schemas"]["PaymentInstructions"];
+            /**
+             * @description Номер счёта строкой как есть («4813-2-СЧ»): при продлении не меняется (Q-420).
+             *     `null` — счёт ещё не выставлен.
+             */
+            invoiceNumber: string | null;
+            /** @description Готовая строка: «Срок оплаты второго транша продлён до 10.10.2026 12:00 МСК». */
+            note: string;
+            /** @description Когда счёт ушёл к оператору. */
+            overdueSince: string | null;
+            paidAt: string | null;
+            /** @description `not_issued` | `awaiting` | `extended` | `operator` | `paid` | `cancelled`. */
+            state: components["schemas"]["FinalPaymentStateName"];
+        };
+        /**
+         * @description Состояние второго транша 50/50 (Q-401).
+         * @enum {string}
+         */
+        FinalPaymentStateName: "not_issued" | "awaiting" | "extended" | "operator" | "paid" | "cancelled";
         /**
          * @description Тон плашки-заглушки в галерее профиля.
          * @enum {string}
@@ -3746,6 +4241,11 @@ export interface components {
              * @example 0
              */
             unbalancedEntries: number;
+        };
+        /** @description Тело `POST /seller/orders/{id}/delivered` (решение п. 13). */
+        MarkDeliveredBody: {
+            /** @description Трек-номер перевозчика, по которому проверяется доставка (1–64 символа). */
+            trackingNumber: string;
         };
         /** @description `POST /orders/{id}/messages/read`. */
         MarkMessagesReadBody: {
@@ -4153,7 +4653,14 @@ export interface components {
             /** @description Когда партия принята. */
             acceptedAt?: string | null;
             artwork: components["schemas"]["OrderArtwork"][];
+            /** @description Подписи сторон под макетом (п. 16). */
+            artworkSignoff: components["schemas"]["ArtworkSignoff"];
             bucket: components["schemas"]["OrderBucket"];
+            /**
+             * @description Можно ли отменить заказ самому (п. 17): черновик или неоплаченный счёт.
+             *     После оплаты — только через оператора.
+             */
+            canCancel: boolean;
             /** @description Дедлайн подтверждения заводом; появляется вместе с деньгами в эскроу. */
             confirmDeadlineAt?: string | null;
             createdAt: string;
@@ -4191,7 +4698,8 @@ export interface components {
             repeat: boolean;
             /**
              * Format: int32
-             * @description Скидка за повтор у этой фабрики, %.
+             * @description Скидка за повтор, доступная у этой фабрики сейчас (из оффера), % — подпись кнопки
+             *     «Повторить партию −9 %». Не скидка, применённая к этому заказу (Q-333).
              */
             repeatDiscountPercent?: number | null;
             /** @description Плановая отгрузка, ISO `YYYY-MM-DD`. */
@@ -4199,6 +4707,11 @@ export interface components {
             status: components["schemas"]["OrderStatus"];
             submittedAt?: string | null;
             tracking?: null | components["schemas"]["OrderTracking"];
+            /**
+             * @description Трек-номер доставки: его вводит завод, отмечая «Доставлено» (п. 13).
+             *     `null` — завод ещё не отметил доставку (или её отметил оператор).
+             */
+            trackingNumber?: string | null;
             /**
              * Format: int64
              * @description Непрочитанных сообщений чата — бейдж на вкладке и в списке заказов.
@@ -4595,11 +5108,51 @@ export interface components {
             roleTitle: string;
             verificationStatus: components["schemas"]["VerificationStatusName"];
         };
+        /** @description Банковский счёт организации. */
+        OrgBankAccount: {
+            /**
+             * @description Расчётный счёт, 20 цифр.
+             * @example 40702810200000012345
+             */
+            account: string;
+            /** @example ПАО Сбербанк */
+            bankName: string;
+            /** @example 044525225 */
+            bik: string;
+            /**
+             * @description Корсчёт банка; `null` только у подразделений Банка России.
+             * @example 30101810400000000225
+             */
+            correspondentAccount: string | null;
+        };
+        /** @description Банковский блок формы. Пустой блок (все поля пустые) — «счёта нет». */
+        OrgBankAccountInput: {
+            account?: string | null;
+            bankName?: string | null;
+            bik?: string | null;
+            correspondentAccount?: string | null;
+        };
         /**
          * @description Вид организации: заказывает производство или принимает заказы.
          * @enum {string}
          */
         OrgKindName: "customer" | "factory";
+        /** @description Реквизиты организации (экран «Компания»). Видны владельцу и бухгалтеру. */
+        OrgRequisites: {
+            bank: null | components["schemas"]["OrgBankAccount"];
+            /** @example 773601001 */
+            kpp: string | null;
+            legalAddress: string | null;
+            /**
+             * @description ОГРН (13 цифр) у юрлица, ОГРНИП (15 цифр) у ИП.
+             * @example 1027700132195
+             */
+            ogrn: string | null;
+            /** Format: uuid */
+            orgId: string;
+            /** @description Когда реквизиты меняли последний раз, RFC 3339; `null` — ни разу. */
+            updatedAt: string | null;
+        };
         /** @description Постраничная выдача. */
         PageInfo: {
             /** Format: int32 */
@@ -4648,8 +5201,8 @@ export interface components {
          * @description Платёжное поручение: B2B-оплата — это счёт и перевод, а не карта (5.4).
          *
          *     Содержимое приходит из `payments::PaymentInstruction`, а форма — фронтовая
-         *     (Q-198): модуль денег нумерует счета по сделке (`4900-1-СЧ`), а экран оплаты
-         *     ждёт номер по заказу. Сводит их этот тип.
+         *     (Q-198). Номер счёта — тот же, что в `payments` (Q-345): по заказу, у 50/50 —
+         *     с номером транша.
          */
         PaymentInstructions: {
             /** @description Расчётный счёт получателя — номинальный счёт платформы. */
@@ -4669,7 +5222,10 @@ export interface components {
             correspondentAccount: string;
             /** @description Дедлайн оплаты, RFC 3339. После него резерв мощности снимается. */
             dueAt: string;
-            /** @description Номер счёта: «4813-СЧ». */
+            /**
+             * @description Номер счёта из `payments`: «4813-СЧ» одним платежом, «4813-1-СЧ» — первый
+             *     транш 50/50.
+             */
             invoiceNumber: string;
             payeeInn: string;
             payeeKpp: string;
@@ -4718,6 +5274,12 @@ export interface components {
             /** @example RUB */
             currency: string;
             /**
+             * Format: int64
+             * @description Часть суммы без комиссии — доставка (DECISIONS.md, п. 2), копейки.
+             * @example 400000
+             */
+            feeExempt: number;
+            /**
              * Format: int32
              * @description Комиссия платформы, зафиксированная при открытии сделки.
              * @example 8
@@ -4733,7 +5295,7 @@ export interface components {
             id: string;
             /**
              * Format: int64
-             * @description Публичный номер сделки — он же в назначении платежа.
+             * @description Публичный номер сделки — внутренний, в назначение платежа не попадает.
              * @example 4900
              */
             no: number;
@@ -4751,6 +5313,13 @@ export interface components {
              */
             subjectId: string;
             subjectKind: components["schemas"]["SubjectKindName"];
+            /**
+             * Format: int64
+             * @description Публичный номер объекта сделки (номер заказа) — он в назначении платежа
+             *     (DECISIONS.md, п. 6). `null` у сделок, открытых до миграции 0021.
+             * @example 4813
+             */
+            subjectNo: number | null;
             tranches: components["schemas"]["PaymentsTranche"][];
             /** Format: date-time */
             updatedAt: string;
@@ -4782,7 +5351,7 @@ export interface components {
             no: number;
             /**
              * @description Назначение платежа: по нему поступление сопоставляется со сделкой.
-             * @example Оплата по сделке № 4900-1 на площадке Партия. Без НДС
+             * @example Оплата по заказу № 4813, спецификация 4813-С. Без НДС
              */
             reference: string;
             status: components["schemas"]["TrancheStatusName"];
@@ -5495,10 +6064,17 @@ export interface components {
         /** @description Заказ глазами завода. */
         SellerOrder: {
             artwork: components["schemas"]["SellerOrderArtwork"][];
+            /** @description Подписи сторон под макетом (п. 16). */
+            artworkSignoff: components["schemas"]["ArtworkSignoff"];
             /** @description Какие команды автомата завод может подать прямо сейчас. */
             availableCommands: components["schemas"]["SellerStageCommand"][];
             canConfirm: boolean;
             canDecline: boolean;
+            /**
+             * @description Можно отметить «Доставлено» по трек-номеру (`POST /seller/orders/{id}/delivered`,
+             *     п. 13): партия отгружена и спора нет.
+             */
+            canMarkDelivered: boolean;
             confirmDeadlineAt: string | null;
             createdAt: string;
             customer: string;
@@ -5508,6 +6084,7 @@ export interface components {
             delivery: null | components["schemas"]["OrderDelivery"];
             disputeOpen: boolean;
             documents: components["schemas"]["OrderDocument"][];
+            finalPayment: null | components["schemas"]["FinalPayment"];
             /** Format: int32 */
             id: number;
             money: components["schemas"]["SellerOrderMoney"];
@@ -5529,6 +6106,8 @@ export interface components {
             shipDate: string | null;
             status: components["schemas"]["OrderStatus"];
             title: string;
+            /** @description Трек-номер, введённый при отметке доставки; `null` — ещё не отмечена. */
+            trackingNumber: string | null;
             /** Format: int64 */
             unreadMessages: number;
             updatedAt: string;
@@ -5617,6 +6196,11 @@ export interface components {
         };
         /** @description Счётчики вкладок и KPI сводки — по всей выдаче, а не по странице. */
         SellerOrderSummary: {
+            /**
+             * Format: int64
+             * @description Q-335: приняты заказчиком, выплата ещё не проведена.
+             */
+            accepted: number;
             /** Format: int64 */
             all: number;
             /**
@@ -5800,12 +6384,12 @@ export interface components {
          * @description Ступень заказа в кабинете завода (`SellerStage` контракта).
          * @enum {string}
          */
-        SellerStage: "new" | "in_production" | "quality_control" | "shipped" | "paid_out";
+        SellerStage: "new" | "in_production" | "quality_control" | "shipped" | "accepted" | "paid_out";
         /**
          * @description Команда автомата, которую подаёт завод (`SellerStageCommand`).
          * @enum {string}
          */
-        SellerStageCommand: "start_artwork_review" | "materials_purchased" | "start_quality_control" | "ship";
+        SellerStageCommand: "start_artwork_review" | "approve_artwork" | "materials_purchased" | "start_quality_control" | "ship";
         SellerTodoItem: {
             href: string;
             key: string;
@@ -5857,6 +6441,21 @@ export interface components {
          * @enum {string}
          */
         SubjectKindName: "order" | "sample";
+        /**
+         * @description Тело `POST /orders/{id}/submit` — принятие оферты (решение п. 12).
+         *
+         *     Время принятия ставит сервер, IP и браузер он берёт из заголовков: браузеру
+         *     здесь верят только в том, какую версию текста он показал человеку.
+         */
+        SubmitOrderBody: {
+            /** @description Галочка «Принимаю условия оферты». Без `true` — 422 `orders/offer-not-accepted`. */
+            offerAccepted: boolean | null;
+            /**
+             * @description Версия оферты, которую видел заказчик («2026-10-01»): латиница, цифры, `.-_`,
+             *     до 64 символов.
+             */
+            offerVersion: string | null;
+        };
         /**
          * @description Ответ `POST /orders/{id}/submit`.
          *
@@ -5966,6 +6565,13 @@ export interface components {
             /** Format: int32 */
             qty?: number | null;
             sizes?: components["schemas"]["OrderSizeLine"][] | null;
+        };
+        /** @description `PUT /orgs/{id}/requisites` — реквизиты целиком: не присланное поле стирается. */
+        UpdateOrgRequisitesRequest: {
+            bank?: null | components["schemas"]["OrgBankAccountInput"];
+            kpp?: string | null;
+            legalAddress?: string | null;
+            ogrn?: string | null;
         };
         UpdateRankingBody: {
             weights: components["schemas"]["RankingWeightInput"][];
@@ -6471,6 +7077,190 @@ export interface operations {
             };
         };
     };
+    adminListOverdueTranches: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Очередь */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOverdueTranchePage"];
+                };
+            };
+            /** @description Вошедший — не оператор платформы */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    adminOpenOverdueDispute: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Публичный номер заказа */
+                orderNo: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminOverdueDisputeBody"];
+            };
+        };
+        responses: {
+            /** @description Спор открыт */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOverdueActionResult"];
+                };
+            };
+            /** @description Вошедший — не оператор платформы */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Нет такого заказа */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Счёт уже оплачен, снят или не в очереди */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Нет комментария */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    adminExtendOverdueTranche: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Публичный номер заказа */
+                orderNo: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminOverdueExtendBody"];
+            };
+        };
+        responses: {
+            /** @description Срок продлён */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOverdueActionResult"];
+                };
+            };
+            /** @description Вошедший — не оператор платформы */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Нет такого заказа */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Счёт уже оплачен, снят или не в очереди */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Часы вне 1..=336 или нет комментария */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    adminOverdueTranchesCount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Счётчик */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminOverdueTrancheCount"];
+                };
+            };
+            /** @description Вошедший — не оператор платформы */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     adminOverview: {
         parameters: {
             query?: never;
@@ -6846,7 +7636,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Сумма весов не равна 100 */
+            /** @description `admin/weights-sum` — сумма весов не 100; `admin/weights-invalid` — неизвестный, повторный или пропущенный фактор либо вес вне 0..100 (`errors["weights.<key>"]`) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -6888,8 +7678,251 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Сумма весов не равна 100 */
+            /** @description Те же правила, что у `PUT /admin/ranking`: `admin/weights-sum` или `admin/weights-invalid` */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    adminListStuck: {
+        parameters: {
+            query?: {
+                /** @description Курсор из `nextCursor` предыдущей страницы. */
+                cursor?: string;
+                /** @description Только одна очередь. Без параметра — все три. */
+                kind?: components["schemas"]["AdminStuckKind"];
+                /**
+                 * @description Сколько строк вернуть, 1..=100.
+                 * @example 20
+                 */
+                limit?: number;
+                /** @description Точный тип: `order.confirm_deadline`, `order.status_changed`, `bank`. */
+                type?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Страница ленты */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminStuckPage"];
+                };
+            };
+            /** @description Битый курсор или неизвестный фильтр */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Вошедший — не оператор платформы */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    adminStuckCard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Строка очереди */
+                id: string;
+                /** @description Очередь */
+                kind: components["schemas"]["AdminStuckKind"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Карточка */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminStuckCard"];
+                };
+            };
+            /** @description Вошедший — не оператор платформы */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Нет такой строки */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    adminStuckResolve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Строка очереди */
+                id: string;
+                /** @description Очередь */
+                kind: components["schemas"]["AdminStuckKind"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminStuckActionBody"];
+            };
+        };
+        responses: {
+            /** @description Отмечено решённым */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminStuckCard"];
+                };
+            };
+            /** @description Вошедший — не оператор платформы */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Нет такой строки */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Строка уже не зависла или занята воркером */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Обоснование обязательно */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    adminStuckRetry: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Строка очереди */
+                id: string;
+                /** @description Очередь */
+                kind: components["schemas"]["AdminStuckKind"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AdminStuckActionBody"];
+            };
+        };
+        responses: {
+            /** @description Строка возвращена в работу */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminStuckCard"];
+                };
+            };
+            /** @description Вошедший — не оператор платформы */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Нет такой строки */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Строка уже не зависла или занята воркером */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    adminStuckCount: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Счётчики */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminStuckCount"];
+                };
+            };
+            /** @description Вошедший — не оператор платформы */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8430,6 +9463,51 @@ export interface operations {
             };
         };
     };
+    cancelOrder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Публичный номер заказа */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelOrderBody"];
+            };
+        };
+        responses: {
+            /** @description Заказ отменён */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Order"];
+                };
+            };
+            /** @description Нет такого заказа или он чужой */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Деньги уже поступили — только через оператора */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     getDispute: {
         parameters: {
             query?: never;
@@ -8998,7 +10076,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SubmitOrderBody"];
+            };
+        };
         responses: {
             /** @description Заказ оформлен, счёт выставлен */
             200: {
@@ -9027,7 +10109,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Оформление не закончено (`errors` по полям) */
+            /** @description Оформление не закончено либо оферта не принята (`errors` по полям) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -9130,6 +10212,128 @@ export interface operations {
             };
             /** @description Пользователь не участник этой организации */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Модулю нужен DATABASE_URL */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getOrgRequisites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Идентификатор организации */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Реквизиты */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgRequisites"];
+                };
+            };
+            /** @description Сессии нет */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Не владелец и не бухгалтер этой организации */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Модулю нужен DATABASE_URL */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    updateOrgRequisites: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Идентификатор организации */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOrgRequisitesRequest"];
+            };
+        };
+        responses: {
+            /** @description Реквизиты сохранены */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgRequisites"];
+                };
+            };
+            /** @description Тело запроса не разобрано */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Сессии нет */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Не владелец и не бухгалтер этой организации */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Реквизиты не прошли проверку */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10559,6 +11763,69 @@ export interface operations {
             };
         };
     };
+    markSellerOrderDelivered: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Публичный номер заказа */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarkDeliveredBody"];
+            };
+        };
+        responses: {
+            /** @description Доставка отмечена, идёт приёмка */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SellerOrder"];
+                };
+            };
+            /** @description Организация вошедшего — не завод */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Нет такого заказа или он чужой */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Партия не в статусе `shipped` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Трек-номер не годится (`errors.trackingNumber`) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     replyToDispute: {
         parameters: {
             query?: never;
@@ -10827,7 +12094,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description Из этого статуса переход не применим */
+            /** @description Из этого статуса переход не применим (`seller/transition-not-allowed`) или `ship` до оплаты второго счёта 50/50 (`orders/ship-before-final-payment`) */
             409: {
                 headers: {
                     [name: string]: unknown;

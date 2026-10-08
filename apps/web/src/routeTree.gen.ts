@@ -33,10 +33,13 @@ import { Route as PublicFactoriesRouteImport } from './routes/_public/factories'
 import { Route as PublicForFactoriesRouteImport } from './routes/_public/for-factories'
 import { Route as PublicHowItWorksRouteImport } from './routes/_public/how-it-works'
 import { Route as AdminAdminIndexRouteImport } from './routes/_admin/admin.index'
+import { Route as AdminAdminDeliveryRouteImport } from './routes/_admin/admin.delivery'
 import { Route as AdminAdminDisputesRouteImport } from './routes/_admin/admin.disputes'
 import { Route as AdminAdminFinanceRouteImport } from './routes/_admin/admin.finance'
 import { Route as AdminAdminModerationRouteImport } from './routes/_admin/admin.moderation'
+import { Route as AdminAdminOverdueTranchesRouteImport } from './routes/_admin/admin.overdue-tranches'
 import { Route as AdminAdminRankingRouteImport } from './routes/_admin/admin.ranking'
+import { Route as AdminAdminStuckRouteImport } from './routes/_admin/admin.stuck'
 import { Route as AdminAdminTaxonomyRouteImport } from './routes/_admin/admin.taxonomy'
 import { Route as CabinetAccountRepeatRouteImport } from './routes/_cabinet/account.repeat'
 import { Route as CabinetSellerIndexRouteImport } from './routes/_cabinet/seller.index'
@@ -171,6 +174,11 @@ const AdminAdminIndexRoute = AdminAdminIndexRouteImport.update({
   path: '/admin/',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAdminDeliveryRoute = AdminAdminDeliveryRouteImport.update({
+  id: '/admin/delivery',
+  path: '/admin/delivery',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminAdminDisputesRoute = AdminAdminDisputesRouteImport.update({
   id: '/admin/disputes',
   path: '/admin/disputes',
@@ -186,9 +194,20 @@ const AdminAdminModerationRoute = AdminAdminModerationRouteImport.update({
   path: '/admin/moderation',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminAdminOverdueTranchesRoute =
+  AdminAdminOverdueTranchesRouteImport.update({
+    id: '/admin/overdue-tranches',
+    path: '/admin/overdue-tranches',
+    getParentRoute: () => AdminRoute,
+  } as any)
 const AdminAdminRankingRoute = AdminAdminRankingRouteImport.update({
   id: '/admin/ranking',
   path: '/admin/ranking',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminAdminStuckRoute = AdminAdminStuckRouteImport.update({
+  id: '/admin/stuck',
+  path: '/admin/stuck',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminAdminTaxonomyRoute = AdminAdminTaxonomyRouteImport.update({
@@ -314,10 +333,13 @@ export interface FileRoutesByFullPath {
   '/factories': typeof PublicFactoriesRoute
   '/for-factories': typeof PublicForFactoriesRoute
   '/how-it-works': typeof PublicHowItWorksRoute
+  '/admin/delivery': typeof AdminAdminDeliveryRoute
   '/admin/disputes': typeof AdminAdminDisputesRoute
   '/admin/finance': typeof AdminAdminFinanceRoute
   '/admin/moderation': typeof AdminAdminModerationRoute
+  '/admin/overdue-tranches': typeof AdminAdminOverdueTranchesRoute
   '/admin/ranking': typeof AdminAdminRankingRoute
+  '/admin/stuck': typeof AdminAdminStuckRoute
   '/admin/taxonomy': typeof AdminAdminTaxonomyRoute
   '/account/repeat': typeof CabinetAccountRepeatRoute
   '/seller/samples': typeof CabinetSellerSamplesRoute
@@ -357,10 +379,13 @@ export interface FileRoutesByTo {
   '/factories': typeof PublicFactoriesRoute
   '/for-factories': typeof PublicForFactoriesRoute
   '/how-it-works': typeof PublicHowItWorksRoute
+  '/admin/delivery': typeof AdminAdminDeliveryRoute
   '/admin/disputes': typeof AdminAdminDisputesRoute
   '/admin/finance': typeof AdminAdminFinanceRoute
   '/admin/moderation': typeof AdminAdminModerationRoute
+  '/admin/overdue-tranches': typeof AdminAdminOverdueTranchesRoute
   '/admin/ranking': typeof AdminAdminRankingRoute
+  '/admin/stuck': typeof AdminAdminStuckRoute
   '/admin/taxonomy': typeof AdminAdminTaxonomyRoute
   '/account/repeat': typeof CabinetAccountRepeatRoute
   '/seller/samples': typeof CabinetSellerSamplesRoute
@@ -407,10 +432,13 @@ export interface FileRoutesById {
   '/_public/for-factories': typeof PublicForFactoriesRoute
   '/_public/how-it-works': typeof PublicHowItWorksRoute
   '/_public/': typeof PublicIndexRoute
+  '/_admin/admin/delivery': typeof AdminAdminDeliveryRoute
   '/_admin/admin/disputes': typeof AdminAdminDisputesRoute
   '/_admin/admin/finance': typeof AdminAdminFinanceRoute
   '/_admin/admin/moderation': typeof AdminAdminModerationRoute
+  '/_admin/admin/overdue-tranches': typeof AdminAdminOverdueTranchesRoute
   '/_admin/admin/ranking': typeof AdminAdminRankingRoute
+  '/_admin/admin/stuck': typeof AdminAdminStuckRoute
   '/_admin/admin/taxonomy': typeof AdminAdminTaxonomyRoute
   '/_cabinet/account/repeat': typeof CabinetAccountRepeatRoute
   '/_cabinet/seller/samples': typeof CabinetSellerSamplesRoute
@@ -452,10 +480,13 @@ export interface FileRouteTypes {
     | '/factories'
     | '/for-factories'
     | '/how-it-works'
+    | '/admin/delivery'
     | '/admin/disputes'
     | '/admin/finance'
     | '/admin/moderation'
+    | '/admin/overdue-tranches'
     | '/admin/ranking'
+    | '/admin/stuck'
     | '/admin/taxonomy'
     | '/account/repeat'
     | '/seller/samples'
@@ -495,10 +526,13 @@ export interface FileRouteTypes {
     | '/factories'
     | '/for-factories'
     | '/how-it-works'
+    | '/admin/delivery'
     | '/admin/disputes'
     | '/admin/finance'
     | '/admin/moderation'
+    | '/admin/overdue-tranches'
     | '/admin/ranking'
+    | '/admin/stuck'
     | '/admin/taxonomy'
     | '/account/repeat'
     | '/seller/samples'
@@ -544,10 +578,13 @@ export interface FileRouteTypes {
     | '/_public/for-factories'
     | '/_public/how-it-works'
     | '/_public/'
+    | '/_admin/admin/delivery'
     | '/_admin/admin/disputes'
     | '/_admin/admin/finance'
     | '/_admin/admin/moderation'
+    | '/_admin/admin/overdue-tranches'
     | '/_admin/admin/ranking'
+    | '/_admin/admin/stuck'
     | '/_admin/admin/taxonomy'
     | '/_cabinet/account/repeat'
     | '/_cabinet/seller/samples'
@@ -749,6 +786,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAdminIndexRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/_admin/admin/delivery': {
+      id: '/_admin/admin/delivery'
+      path: '/admin/delivery'
+      fullPath: '/admin/delivery'
+      preLoaderRoute: typeof AdminAdminDeliveryRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/admin/disputes': {
       id: '/_admin/admin/disputes'
       path: '/admin/disputes'
@@ -770,11 +814,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminAdminModerationRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/_admin/admin/overdue-tranches': {
+      id: '/_admin/admin/overdue-tranches'
+      path: '/admin/overdue-tranches'
+      fullPath: '/admin/overdue-tranches'
+      preLoaderRoute: typeof AdminAdminOverdueTranchesRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/_admin/admin/ranking': {
       id: '/_admin/admin/ranking'
       path: '/admin/ranking'
       fullPath: '/admin/ranking'
       preLoaderRoute: typeof AdminAdminRankingRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/_admin/admin/stuck': {
+      id: '/_admin/admin/stuck'
+      path: '/admin/stuck'
+      fullPath: '/admin/stuck'
+      preLoaderRoute: typeof AdminAdminStuckRouteImport
       parentRoute: typeof AdminRoute
     }
     '/_admin/admin/taxonomy': {
@@ -914,19 +972,25 @@ declare module '@tanstack/react-router' {
 }
 
 interface AdminRouteChildren {
+  AdminAdminDeliveryRoute: typeof AdminAdminDeliveryRoute
   AdminAdminDisputesRoute: typeof AdminAdminDisputesRoute
   AdminAdminFinanceRoute: typeof AdminAdminFinanceRoute
   AdminAdminModerationRoute: typeof AdminAdminModerationRoute
+  AdminAdminOverdueTranchesRoute: typeof AdminAdminOverdueTranchesRoute
   AdminAdminRankingRoute: typeof AdminAdminRankingRoute
+  AdminAdminStuckRoute: typeof AdminAdminStuckRoute
   AdminAdminTaxonomyRoute: typeof AdminAdminTaxonomyRoute
   AdminAdminIndexRoute: typeof AdminAdminIndexRoute
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
+  AdminAdminDeliveryRoute: AdminAdminDeliveryRoute,
   AdminAdminDisputesRoute: AdminAdminDisputesRoute,
   AdminAdminFinanceRoute: AdminAdminFinanceRoute,
   AdminAdminModerationRoute: AdminAdminModerationRoute,
+  AdminAdminOverdueTranchesRoute: AdminAdminOverdueTranchesRoute,
   AdminAdminRankingRoute: AdminAdminRankingRoute,
+  AdminAdminStuckRoute: AdminAdminStuckRoute,
   AdminAdminTaxonomyRoute: AdminAdminTaxonomyRoute,
   AdminAdminIndexRoute: AdminAdminIndexRoute,
 }

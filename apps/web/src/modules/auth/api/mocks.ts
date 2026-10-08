@@ -17,4 +17,6 @@ export const installAuthMocks = (inner: ApiService): ApiService =>
     listAuthSessions: () => backend.listAuthSessions(),
     revokeAuthSession: (sessionId) => backend.revokeAuthSession(sessionId),
     createOrg: (body) => backend.createOrg(body),
+    getOrgRequisites: (orgId) => backend.getOrgRequisites(orgId),
+    updateOrgRequisites: (orgId, body) => backend.updateOrgRequisites(orgId, body),
   });

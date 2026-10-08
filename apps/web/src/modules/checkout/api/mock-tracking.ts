@@ -41,7 +41,17 @@ import { customerStageOf, orderStatusTitle } from "@/shared/lib/order-status";
 
 import { ARTWORK_LIMITS, isAllowedArtworkType } from "../lib/artwork";
 import type { MockState } from "./mock-backend";
-import { autoAcceptAt, platformFeeOf } from "./mock-projections";
+import {
+  autoAcceptAt,
+  finalPaymentOf,
+  firstTrancheAmount,
+  invoiceNumberOf,
+  isSplitPayment,
+  issueSecondTranche,
+  orderFeeOf,
+  secondTrancheAmount,
+  settleSecondTranche,
+} from "./mock-projections";
 import { messagesOf, type MockOrder, type NewOrderEvent, statusEventText } from "./mock-seed";
 
 /* Мок крейтов `tracking`, `messaging`, `documents`, `disputes`, `notifications`, `payments`.
@@ -447,7 +457,8 @@ export function createTrackingSlice(ctx: TrackingContext): MockTrackingSlice {
 
   function escrowDealOf(order: MockOrder): EscrowDeal {
     const total = order.quote.total;
-    const fee = platformFeeOf(total);
+    // п. 2: комиссия только со стоимости товара
+    const fee = orderFeeOf(order);
     const open = ctx.openDisputeOf(order.id);
     const released = order.status === "completed";
     const refunded =
@@ -457,6 +468,50 @@ export function createTrackingSlice(ctx: TrackingContext): MockTrackingSlice {
       order.deliveredAt === null || order.deliveredAt === undefined
         ? null
         : autoAcceptAt(order.deliveredAt);
+    const split = isSplitPayment(order);
+    const statusOf = (paid: boolean) =>
+      released ? "released" : refunded ? "refunded" : paid ? "held" : "awaiting_funds";
+    const firstPaid = order.paidAt !== null;
+    const secondPaid = order.secondTranchePaidAt != null;
+    const heldNow = split
+      ? (firstPaid ? firstTrancheAmount(total) : 0) + (secondPaid ? secondTrancheAmount(total) : 0)
+      : total;
+    const tranches: EscrowDeal["tranches"] = split
+      ? [
+          {
+            id: `tr-${String(order.id)}-1`,
+            index: 1,
+            title: "Первый транш · при запуске",
+            amount: firstTrancheAmount(total),
+            status: statusOf(firstPaid),
+            dueAt: order.payment?.dueAt ?? null,
+            heldAt: order.paidAt,
+            releasedAt: released ? (order.acceptedAt ?? null) : null,
+          },
+          {
+            // п. 4: выставляется по событию «готов к отгрузке»; до этого срока нет
+            id: `tr-${String(order.id)}-2`,
+            index: 2,
+            title: "Второй транш · перед отгрузкой",
+            amount: secondTrancheAmount(total),
+            status: statusOf(secondPaid),
+            dueAt: order.secondTrancheDueAt ?? null,
+            heldAt: order.secondTranchePaidAt ?? null,
+            releasedAt: released ? (order.acceptedAt ?? null) : null,
+          },
+        ]
+      : [
+          {
+            id: `tr-${String(order.id)}-1`,
+            index: 1,
+            title: "Транш · вся сумма при запуске",
+            amount: total,
+            status: statusOf(held),
+            dueAt: order.payment?.dueAt ?? null,
+            heldAt: order.paidAt,
+            releasedAt: released ? (order.acceptedAt ?? null) : null,
+          },
+        ];
 
     return {
       id: `deal-${String(order.id)}`,
@@ -472,25 +527,16 @@ export function createTrackingSlice(ctx: TrackingContext): MockTrackingSlice {
               : "awaiting_funds",
       method: order.paymentMethod ?? "escrow_full",
       amount: total,
-      heldAmount: held || open ? total : 0,
+      heldAmount: held || open ? heldNow : 0,
       releasedAmount: released ? total - fee : 0,
       refundedAmount: refunded ? total : 0,
       platformFee: fee,
       factoryPayout: total - fee,
-      tranches: [
-        {
-          id: `tr-${String(order.id)}-1`,
-          index: 1,
-          title: "Транш · вся сумма при запуске",
-          amount: total,
-          status: released ? "released" : refunded ? "refunded" : held ? "held" : "awaiting_funds",
-          dueAt: order.payment?.dueAt ?? null,
-          heldAt: order.paidAt,
-          releasedAt: released ? (order.acceptedAt ?? null) : null,
-        },
-      ],
+      tranches,
       autoReleaseAt: acceptanceDeadline,
       blockedByDisputeId: open?.id ?? null,
+      // Q-384, Q-401: второй счёт с реквизитами и его состояние
+      finalPayment: finalPaymentOf(order, true),
     };
   }
 
@@ -1142,18 +1188,45 @@ export function createTrackingSlice(ctx: TrackingContext): MockTrackingSlice {
         const own = state.orders.filter(
           (order) => order.orgId === orgId && order.status !== "draft",
         );
+        for (const order of own) settleSecondTranche(order, now(), emit);
         const deals = own.map((order) => ({ order, deal: escrowDealOf(order) }));
         const held = deals.filter((item) => item.deal.heldAmount > 0);
-        const invoices = own.filter((order) => order.status === "awaiting_payment");
+        const first = own
+          .filter((order) => order.status === "awaiting_payment")
+          .map((order) => ({
+            id: `inv-${String(order.id)}`,
+            orderId: order.id,
+            number: order.payment?.invoiceNumber ?? invoiceNumberOf(order.id),
+            title: `${order.offer.title} · «${order.offer.factoryName}»`,
+            amount: order.payment?.amountDue ?? order.quote.total,
+            dueAt: order.payment?.dueAt ?? new Date(now()).toISOString(),
+          }));
+        // п. 4: второй транш 50/50 — счёт появляется, когда партия готова к отгрузке
+        const second = own
+          .filter(
+            (order) =>
+              isSplitPayment(order) &&
+              order.secondTrancheDueAt != null &&
+              order.secondTranchePaidAt == null &&
+              order.secondTrancheCancelledAt == null &&
+              order.status !== "cancelled" &&
+              order.status !== "refunded",
+          )
+          .map((order) => ({
+            id: `inv-${String(order.id)}-2`,
+            orderId: order.id,
+            number: invoiceNumberOf(order.id, 2),
+            title: `Второй транш · перед отгрузкой · ${order.offer.title}`,
+            amount: secondTrancheAmount(order.quote.total),
+            dueAt: order.secondTrancheDueAt ?? new Date(now()).toISOString(),
+          }));
+        const invoices = [...first, ...second];
         const operations = operationsOfOrg(orgId);
 
         return {
           heldTotal: held.reduce((sum, item) => sum + item.deal.heldAmount, 0),
           heldOrders: held.length,
-          awaitingTotal: invoices.reduce(
-            (sum, order) => sum + (order.payment?.amountDue ?? order.quote.total),
-            0,
-          ),
+          awaitingTotal: invoices.reduce((sum, invoice) => sum + invoice.amount, 0),
           awaitingInvoices: invoices.length,
           paidOutTotal: deals.reduce((sum, item) => sum + item.deal.releasedAmount, 0),
           refundedTotal: deals.reduce((sum, item) => sum + item.deal.refundedAmount, 0),
@@ -1175,14 +1248,7 @@ export function createTrackingSlice(ctx: TrackingContext): MockTrackingSlice {
                     : null,
           })),
           operations,
-          invoices: invoices.map((order) => ({
-            id: `inv-${String(order.id)}`,
-            orderId: order.id,
-            number: order.payment?.invoiceNumber ?? `${String(order.id)}-СЧ`,
-            title: `${order.offer.title} · «${order.offer.factoryName}»`,
-            amount: order.payment?.amountDue ?? order.quote.total,
-            dueAt: order.payment?.dueAt ?? new Date(now()).toISOString(),
-          })),
+          invoices,
         };
       });
     },
@@ -1198,6 +1264,8 @@ export function createTrackingSlice(ctx: TrackingContext): MockTrackingSlice {
             "Деньги не поступили — эскроу-сделка не создана.",
           );
         }
+        // Q-401: таймер срока второго транша — у мока лениво, при чтении
+        settleSecondTranche(order, now(), emit);
         return escrowDealOf(order);
       });
     },
@@ -1224,6 +1292,12 @@ export function createTrackingSlice(ctx: TrackingContext): MockTrackingSlice {
         }
         if (next === "acceptance") order.deliveredAt = occurredAt;
         if (next === "completed") order.acceptedAt = occurredAt;
+        if (next === "materials") {
+          // демо-пульт проходит согласование макета за обе стороны (п. 16)
+          order.artworkSignoff = { customerApprovedAt: occurredAt, factoryApprovedAt: occurredAt };
+        }
+        // п. 4: «готов к отгрузке» — у 50/50 выставляется второй транш
+        if (next === "quality_control") issueSecondTranche(order, occurredAt, emit);
         ctx.touch(order);
 
         const text = statusEventText(next);

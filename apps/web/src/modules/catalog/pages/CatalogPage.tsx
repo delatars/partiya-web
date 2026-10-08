@@ -2,11 +2,11 @@ import type { OfferSummary } from "@partiya/api-contracts";
 import { BreadcrumbLink, BreadcrumbPage, Breadcrumbs, Box, Button, EmptyState } from "@partiya/ui";
 import { useQueries } from "@tanstack/react-query";
 
-import { categoryHref, resolveCategoryPath } from "@/shared/lib/categories";
+import { CATEGORIES, categoryHref, resolveCategoryPath } from "@/shared/lib/categories";
 import { formatNumber } from "@/shared/lib/format";
 import { plural } from "@/shared/lib/plural";
 import { catalogSearchOptions } from "@/shared/api";
-import { AppLink, OfferCard, OfferRow } from "@/shared/ui";
+import { AppLink, CategoryGrid, categoryIcon, OfferCard, OfferRow } from "@/shared/ui";
 
 import { ActiveFilters } from "../components/ActiveFilters";
 import { FiltersSkeleton, OfferGridSkeleton } from "../components/CatalogSkeleton";
@@ -54,6 +54,11 @@ export function CatalogPage({ categoryPath, search, onChange }: CatalogPageProps
   const total = head?.total ?? 0;
   const pageCount = head?.pageCount ?? 1;
   const facets = head?.facets ?? [];
+  /* Категория есть, а заводов в ней ещё нет (п. 28): пустота не из-за условий поиска,
+     поэтому «сбросьте фильтры» тут не к месту — объясняем, что категория наполняется. */
+  const emptyCategory =
+    chain.length > 0 && head?.total === 0 && !hasActiveFilters(search) && search.q === undefined;
+  const EmptyCategoryIcon = categoryIcon(categoryPath[0] ?? "");
 
   return (
     <>
@@ -93,6 +98,15 @@ export function CatalogPage({ categoryPath, search, onChange }: CatalogPageProps
             </span>
           </h1>
 
+          {categoryPath.length === 0 ? (
+            <section aria-labelledby="catalog-categories" className="mt-3 mb-5">
+              <h2 id="catalog-categories" className="font-heading mb-2.5 text-lg font-bold">
+                Категории
+              </h2>
+              <CategoryGrid categories={CATEGORIES} />
+            </section>
+          ) : null}
+
           <ActiveFilters facets={facets} search={search} onChange={onChange} />
 
           {head ? (
@@ -125,6 +139,31 @@ export function CatalogPage({ categoryPath, search, onChange }: CatalogPageProps
               </Box>
             ) : first?.isPending ? (
               <OfferGridSkeleton />
+            ) : emptyCategory ? (
+              <Box>
+                <EmptyState
+                  illustration={
+                    <span
+                      aria-hidden="true"
+                      className="bg-subtle mx-auto mb-3 grid size-18 place-items-center rounded-[18px]"
+                    >
+                      <EmptyCategoryIcon strokeWidth={1.25} className="text-muted size-9" />
+                    </span>
+                  }
+                  title="Заводы в этой категории скоро появятся"
+                  description="Категорию только открыли: производства проходят проверку и подключаются. Пока загляните в соседние категории — или подключите свой завод."
+                  action={
+                    <>
+                      <Button asChild variant="cta">
+                        <AppLink to="/catalog">Весь каталог</AppLink>
+                      </Button>
+                      <Button asChild variant="ghost">
+                        <AppLink to="/for-factories">Подключить завод</AppLink>
+                      </Button>
+                    </>
+                  }
+                />
+              </Box>
             ) : items.length === 0 ? (
               <Box>
                 <EmptyState

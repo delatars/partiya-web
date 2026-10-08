@@ -46,7 +46,12 @@ export function AdminHomePage() {
           value={formatRub(data.escrowTotal)}
           delta={`по ${String(data.escrowOrders)} заказам`}
         />
-        <KpiTile label="Комиссия · месяц" value={formatRub(data.feeMonth)} />
+        {/* бэк считает по проводкам ledger закрытых сделок, а не 8 % с оборота */}
+        <KpiTile
+          label="Удержано комиссии за месяц"
+          value={formatRub(data.feeMonth)}
+          delta="по закрытым сделкам"
+        />
         <KpiTile
           label="Заказов в работе"
           value={formatNumber(data.ordersInWork)}

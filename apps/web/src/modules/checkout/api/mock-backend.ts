@@ -2,6 +2,7 @@ import type {
   AcceptOrderBody,
   ArtworkUploadRequest,
   ArtworkUploadResponse,
+  CancelOrderBody,
   CreateOrderDraftBody,
   CreateSampleBody,
   Dispute,
@@ -22,6 +23,7 @@ import type {
   SampleList,
   SampleOptions,
   SampleOrder,
+  SubmitOrderBody,
   SubmitOrderResponse,
   UpdateOrderDraftBody,
   UserCounters,
@@ -31,7 +33,7 @@ import { ApiError } from "@/shared/api";
 import { addWorkingDays, toIsoDate } from "@/shared/lib/dates";
 import { DEMO_ORG_IDS, DEMO_ORG_LEGAL_ADDRESS, factoryOrgIdOf, isDemoOrg } from "@/shared/lib/demo";
 import { customerStageOf, orderBucketOf, orderProgressPct } from "@/shared/lib/order-status";
-import { decodeQuoteId } from "@/shared/lib/quote-id";
+import { decodeQuoteId, QUOTE_TTL_DAYS } from "@/shared/lib/quote-id";
 import {
   FIRST_MOCK_ORDER_NO,
   FIRST_MOCK_SAMPLE_NO,
@@ -51,7 +53,12 @@ import {
   acceptanceOf,
   escrowNoteOf,
   escrowStatusOf,
-  platformFeeOf,
+  firstTrancheAmount,
+  invoiceNumberOf,
+  isSplitPayment,
+  orderFeeOf,
+  paymentPurpose,
+  signArtwork,
   trackingOf,
 } from "./mock-projections";
 import {
@@ -85,7 +92,8 @@ import { createTrackingSlice, type MockTrackingSlice, type TrackingContext } fro
    сервиса. Прямой импорт `modules/auth` запрещён правилами слоёв, и это правильно:
    домен заказов не должен знать, как устроен домен входа. */
 
-const STORAGE_KEY = "partiya.mock.orders.v3";
+/* v4: оферта в submit, двойная подпись макета, трек-номер, второй транш 50/50 по событию. */
+const STORAGE_KEY = "partiya.mock.orders.v4";
 
 /** Счёт живёт 48 часов — «мощность зарезервирована за вами на 48 часов» из макета. */
 const INVOICE_TTL_MS = 48 * 60 * 60_000;
@@ -180,6 +188,20 @@ const quoteExpired = () =>
     "Цена действовала ограниченное время. Пересчитайте партию — параметры сохранятся.",
   );
 
+/** Проверка тела `submit` — `OfferConsent::parse` бэка: галочка и версия оферты
+    (до 64 символов, латиница, цифры, «.», «-», «_»). Пустой объект — всё в порядке. */
+function offerConsentErrors(body: Partial<SubmitOrderBody> | undefined): Record<string, string[]> {
+  const errors: Record<string, string[]> = {};
+  if (body?.offerAccepted !== true) errors.offerAccepted = ["Примите условия оферты"];
+  const version = body?.offerVersion?.trim() ?? "";
+  if (version.length === 0) {
+    errors.offerVersion = ["Не указана версия оферты"];
+  } else if (version.length > 64 || !/^[A-Za-z0-9._-]+$/u.test(version)) {
+    errors.offerVersion = ["Версия оферты — до 64 символов: латиница, цифры, «.», «-», «_»"];
+  }
+  return errors;
+}
+
 const notDraft = () =>
   problem(
     409,
@@ -248,11 +270,13 @@ function paymentOptionsFor(quote: Quote, factoryRating: number): PaymentMethodOp
     {
       method: "escrow_split_50_50",
       title: "Эскроу 50 / 50",
-      description: "Половина при запуске, половина после приёмки. Для фабрик с рейтингом 4,7+.",
+      // DECISIONS.md, п. 4: второй транш — по событию «готов к отгрузке», не после приёмки
+      description:
+        "Половина при запуске, половина — когда партия готова к отгрузке. Для фабрик с рейтингом 4,7+.",
       available: splitAvailable,
       unavailableReason: splitAvailable ? null : "рейтинг фабрики ниже 4,7",
       // делим пополам вверх: недоплаченной копейки в эскроу быть не должно
-      amountDue: Math.ceil(quote.total / 2),
+      amountDue: firstTrancheAmount(quote.total),
     },
   ];
 }
@@ -339,11 +363,21 @@ function summaryOf(orders: readonly MockOrder[], items: readonly OrderListItem[]
 function stripOwner(order: MockOrder): Order {
   const rest: Partial<MockOrder> = { ...order };
   delete rest.orgId;
+  // внутренние отметки мока: заказчику их не показывают (у бэка их нет в `Order`)
+  delete rest.payoutAt;
+  delete rest.secondTrancheDueAt;
+  delete rest.secondTranchePaidAt;
+  delete rest.secondTrancheExtensions;
+  delete rest.secondTrancheOverdueSince;
+  delete rest.secondTrancheCancelledAt;
+  delete rest.secondTrancheHistory;
+  delete rest.cancelReason;
   return rest as Order;
 }
 
-function documentsFor(id: number, now: Date): OrderDocument[] {
+function documentsFor(id: number, now: Date, split = false): OrderDocument[] {
   const createdAt = now.toISOString();
+  const invoice = invoiceNumberOf(id, split ? 1 : undefined);
   return [
     {
       id: `doc-offer-${String(id)}`,
@@ -364,7 +398,7 @@ function documentsFor(id: number, now: Date): OrderDocument[] {
     {
       id: `doc-invoice-${String(id)}`,
       kind: "invoice",
-      title: `Счёт ${String(id)}-СЧ`,
+      title: `Счёт ${invoice}`,
       url: `#/documents/${String(id)}/invoice.pdf`,
       signature: "none",
       createdAt,
@@ -376,7 +410,8 @@ function paymentFor(order: MockOrder, nowMs: number): PaymentInstructions {
   const no = String(order.id);
   const option = order.paymentOptions.find((item) => item.method === order.paymentMethod);
   return {
-    invoiceNumber: `${no}-СЧ`,
+    // номер счёта выдаёт `payments`: разовая оплата — `N-СЧ`, 50/50 — `N-1-СЧ` / `N-2-СЧ`
+    invoiceNumber: invoiceNumberOf(order.id, isSplitPayment(order) ? 1 : undefined),
     payeeName: PLATFORM_PAYEE.name,
     payeeInn: PLATFORM_PAYEE.inn,
     payeeKpp: PLATFORM_PAYEE.kpp,
@@ -385,7 +420,8 @@ function paymentFor(order: MockOrder, nowMs: number): PaymentInstructions {
     // расчётный счёт заканчивается номером заказа — по нему и сопоставляется поступление
     account: `407028100000${no.padStart(8, "0")}`,
     correspondentAccount: PLATFORM_PAYEE.correspondentAccount,
-    purpose: `Оплата по заказу № ${no}, спецификация ${no}-С. Без НДС`,
+    // п. 6: номер заказа в назначении; у 50/50 — «платёж 1 из 2» (Q-345: номер счёта один)
+    purpose: paymentPurpose(order.id, isSplitPayment(order) ? { no: 1, of: 2 } : undefined),
     amount: order.quote.total,
     amountDue: option?.amountDue ?? order.quote.total,
     dueAt: new Date(nowMs + INVOICE_TTL_MS).toISOString(),
@@ -409,7 +445,12 @@ export interface MockOrdersBackend extends MockTrackingSlice, MockSellerSlice, M
   requestArtworkUpload(id: number, body: ArtworkUploadRequest): Promise<ArtworkUploadResponse>;
   completeArtworkUpload(id: number, fileId: string): Promise<OrderArtwork>;
   deleteArtwork(id: number, fileId: string): Promise<void>;
-  submitOrder(id: number, idempotencyKey: string): Promise<SubmitOrderResponse>;
+  submitOrder(
+    id: number,
+    body: SubmitOrderBody,
+    idempotencyKey: string,
+  ): Promise<SubmitOrderResponse>;
+  cancelOrder(id: number, body: CancelOrderBody): Promise<Order>;
   getSampleOptions(offerId: number): Promise<SampleOptions>;
   requestSampleArtworkUpload(body: ArtworkUploadRequest): Promise<ArtworkUploadResponse>;
   createSample(body: CreateSampleBody, idempotencyKey: string): Promise<SampleOrder>;
@@ -543,6 +584,10 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
 
     return {
       ...base,
+      // п. 16: подписи сторон под макетом; п. 13: трек-номер; п. 17: отмена до оплаты
+      artworkSignoff: order.artworkSignoff ?? { customerApprovedAt: null, factoryApprovedAt: null },
+      trackingNumber: order.trackingNumber ?? null,
+      canCancel: order.status === "draft" || order.status === "awaiting_payment",
       unreadMessages: unreadOf(order.id),
       tracking: paid ? trackingOf(order, events, unreadOf(order.id)) : null,
       escrow: paid
@@ -550,7 +595,13 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
             dealId: `deal-${String(order.id)}`,
             status: escrowStatus,
             amount: total,
-            heldAmount: escrowStatus === "held" || escrowStatus === "blocked" ? total : 0,
+            heldAmount:
+              escrowStatus === "held" || escrowStatus === "blocked"
+                ? isSplitPayment(order)
+                  ? firstTrancheAmount(total) +
+                    (order.secondTranchePaidAt != null ? total - firstTrancheAmount(total) : 0)
+                  : total
+                : 0,
             note: escrowNoteOf(escrowStatus),
             autoReleaseAt: acceptance?.autoAcceptAt ?? null,
             method: order.paymentMethod ?? "escrow_full",
@@ -806,6 +857,8 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
     },
     touch,
     ensureFactorySeed,
+    publicOrder: (order) => publicOrder(order),
+    disputeOpen: (orderId) => openDisputeOf(orderId) !== null,
   });
 
   return {
@@ -1153,7 +1206,11 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
       });
     },
 
-    submitOrder(id: number, idempotencyKey: string): Promise<SubmitOrderResponse> {
+    submitOrder(
+      id: number,
+      body: SubmitOrderBody,
+      idempotencyKey: string,
+    ): Promise<SubmitOrderResponse> {
       return respondAsync(latencyMs, async () => {
         const order = await requireOwnOrder(id);
 
@@ -1162,6 +1219,18 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
         if (stored?.kind === "submit" && stored.orderId === order.id) {
           if (!order.payment) throw notDraft();
           return { order: publicOrder(order), documents: order.documents, payment: order.payment };
+        }
+
+        // п. 12: без принятия оферты и её версии заказ не оформить (`OfferConsent::parse`)
+        const consentErrors = offerConsentErrors(body);
+        if (Object.keys(consentErrors).length > 0) {
+          throw problem(
+            422,
+            `${P}/offer-not-accepted`,
+            "Примите условия оферты",
+            "без принятия оферты заказ не оформить",
+            consentErrors,
+          );
         }
 
         if (order.status !== "draft") throw notDraft();
@@ -1176,13 +1245,61 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
         const nowMs = now();
         order.status = "awaiting_payment";
         order.submittedAt = new Date(nowMs).toISOString();
-        order.documents = documentsFor(order.id, new Date(nowMs));
+        order.documents = documentsFor(order.id, new Date(nowMs), isSplitPayment(order));
         order.payment = paymentFor(order, nowMs);
         touch(order);
+        // в журнал — версия оферты, без IP (Q-351: IP и браузер видит только сервер)
+        tracking.emit(order.id, {
+          type: "note",
+          orderId: order.id,
+          occurredAt: new Date(nowMs).toISOString(),
+          actor: { kind: "customer", name: "Вы", orgId: order.orgId },
+          title: "Принята оферта платформы",
+          detail: `редакция ${body.offerVersion.trim()}`,
+          topic: "offer",
+        });
         state.idempotency[idempotencyKey] = { kind: "submit", orderId: order.id };
         save();
 
         return { order: publicOrder(order), documents: order.documents, payment: order.payment };
+      });
+    },
+
+    /** `POST /orders/{id}/cancel` — отмена заказчиком до оплаты (п. 17, Q-355). */
+    cancelOrder(id: number, body: CancelOrderBody): Promise<Order> {
+      return respondAsync(latencyMs, async () => {
+        const order = await requireOwnOrder(id);
+        if (order.status === "cancelled") return publicOrder(order);
+        if (order.status !== "draft" && order.status !== "awaiting_payment") {
+          throw problem(
+            409,
+            `${P}/cancel-after-payment`,
+            "Отменить можно только через оператора",
+            "Деньги уже поступили в эскроу — отменить заказ можно только через оператора платформы.",
+          );
+        }
+        const reason = body.reason?.trim().slice(0, 500) ?? "";
+        const occurredAt = new Date(now()).toISOString();
+        const from = order.status;
+        order.status = "cancelled";
+        order.customerStage = null;
+        order.bucket = orderBucketOf("cancelled");
+        order.cancelReason = reason.length > 0 ? reason : null;
+        touch(order);
+        tracking.emit(order.id, {
+          type: "status_changed",
+          orderId: order.id,
+          occurredAt,
+          actor: { kind: "customer", name: "Вы", orgId: order.orgId },
+          title: "Заказ отменён",
+          detail:
+            reason.length > 0 ? `Заказчик отменил заказ: ${reason}` : "Заказчик отменил заказ",
+          from,
+          to: "cancelled",
+          stage: null,
+        });
+        save();
+        return publicOrder(order);
       });
     },
 
@@ -1365,20 +1482,17 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
             "Макет согласуют, пока он у технолога.",
           );
         }
-        const occurredAt = new Date(now()).toISOString();
-        order.status = "materials";
+        // п. 16: заказчик подписывает визуал; в `materials` заказ уйдёт второй подписью
+        signArtwork(
+          order,
+          "customer",
+          new Date(now()).toISOString(),
+          { kind: "customer", name: "Вы", orgId: order.orgId },
+          (orderId, event) => {
+            tracking.emit(orderId, event);
+          },
+        );
         touch(order);
-        tracking.emit(order.id, {
-          type: "status_changed",
-          orderId: order.id,
-          occurredAt,
-          actor: { kind: "customer", name: "Вы", orgId: order.orgId },
-          title: "Макет и цветопроба согласованы",
-          detail: "фабрика закупает сырьё",
-          from: "artwork_review",
-          to: "materials",
-          stage: customerStageOf("materials"),
-        });
         save();
         return publicOrder(order);
       });
@@ -1430,7 +1544,7 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
           to: "completed",
           stage: customerStageOf("completed"),
         });
-        const fee = platformFeeOf(order.quote.total);
+        const fee = orderFeeOf(order);
         tracking.emit(order.id, {
           type: "money",
           orderId: order.id,
@@ -1469,7 +1583,11 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
         if (stored?.kind === "repeat") {
           const existing = state.orders.find((row) => row.id === stored.orderId);
           if (existing) {
-            return { order: publicOrder(existing), discountPercent, priceLockedDays: 30 };
+            return {
+              order: publicOrder(existing),
+              discountPercent,
+              priceLockedDays: QUOTE_TTL_DAYS,
+            };
           }
         }
 
@@ -1518,13 +1636,20 @@ export function createMockOrdersBackend(options: MockOrdersOptions): MockOrdersB
           confirmDeadlineAt: null,
           deliveredAt: null,
           acceptedAt: null,
+          // отметки прошлой партии новому черновику не наследуются
+          payoutAt: null,
+          trackingNumber: null,
+          artworkSignoff: { customerApprovedAt: null, factoryApprovedAt: null },
+          secondTrancheDueAt: null,
+          secondTranchePaidAt: null,
+          cancelReason: null,
           shipDate: quote.shipDate ?? null,
           paymentOptions: paymentOptionsFor(quote, offer.factory.rating),
         };
         state.orders.push(draft);
         state.idempotency[idempotencyKey] = { kind: "repeat", orderId: draft.id };
         save();
-        return { order: publicOrder(draft), discountPercent, priceLockedDays: 30 };
+        return { order: publicOrder(draft), discountPercent, priceLockedDays: QUOTE_TTL_DAYS };
       });
     },
 

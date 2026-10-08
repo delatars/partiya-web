@@ -9,12 +9,24 @@ import type {
   AdminOfferDecisionBody,
   AdminOfferList,
   AdminOfferListQuery,
+  AdminOverdueActionResult,
+  AdminOverdueDisputeBody,
+  AdminOverdueExtendBody,
+  AdminOverdueTrancheCount,
+  AdminOverdueTranchePage,
   AdminOverview,
   AdminRanking,
+  AdminStuckActionBody,
+  AdminStuckCard,
+  AdminStuckCount,
+  AdminStuckKind,
+  AdminStuckPage,
+  AdminStuckQuery,
   AdminTaxonomy,
   AdminTranchesPage,
   AdminTranchesQuery,
   ConfirmFundsRequest,
+  Order,
   PayoutConfirmedRequest,
   RankingPreview,
   RankingPreviewBody,
@@ -29,6 +41,10 @@ import type { HttpClient } from "../http-client";
 
 /* Реальный бэк: `/admin/…` (ARCHITECTURE.md, раздел 9). Четыре маршрута `admin-payments`
    уже реализованы — их пути и тела совпадают с openapi.json до символа. */
+function stuckPath(kind: AdminStuckKind, id: string): string {
+  return `/admin/stuck/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`;
+}
+
 export function createBackofficeHttpApi(client: HttpClient): BackofficeApi {
   return {
     getAdminOverview(signal?: AbortSignal): Promise<AdminOverview> {
@@ -153,6 +169,73 @@ export function createBackofficeHttpApi(client: HttpClient): BackofficeApi {
 
     previewAdminRanking(body: RankingPreviewBody): Promise<RankingPreview> {
       return client.post<RankingPreview>("/admin/ranking/preview", { body });
+    },
+
+    markAdminOrderDelivered(orderId: number): Promise<Order> {
+      return client.post<Order>(`/admin/orders/${String(orderId)}/delivered`);
+    },
+
+    listAdminStuck(query: AdminStuckQuery = {}, signal?: AbortSignal): Promise<AdminStuckPage> {
+      return client.get<AdminStuckPage>("/admin/stuck", {
+        query: { kind: query.kind, type: query.type, cursor: query.cursor, limit: query.limit },
+        signal,
+      });
+    },
+
+    getAdminStuckCount(signal?: AbortSignal): Promise<AdminStuckCount> {
+      return client.get<AdminStuckCount>("/admin/stuck/count", { signal });
+    },
+
+    getAdminStuckCard(
+      kind: AdminStuckKind,
+      id: string,
+      signal?: AbortSignal,
+    ): Promise<AdminStuckCard> {
+      return client.get<AdminStuckCard>(stuckPath(kind, id), { signal });
+    },
+
+    retryAdminStuck(
+      kind: AdminStuckKind,
+      id: string,
+      body: AdminStuckActionBody,
+    ): Promise<AdminStuckCard> {
+      return client.post<AdminStuckCard>(`${stuckPath(kind, id)}/retry`, { body });
+    },
+
+    resolveAdminStuck(
+      kind: AdminStuckKind,
+      id: string,
+      body: AdminStuckActionBody,
+    ): Promise<AdminStuckCard> {
+      return client.post<AdminStuckCard>(`${stuckPath(kind, id)}/resolve`, { body });
+    },
+
+    listAdminOverdueTranches(signal?: AbortSignal): Promise<AdminOverdueTranchePage> {
+      return client.get<AdminOverdueTranchePage>("/admin/overdue-tranches", { signal });
+    },
+
+    getAdminOverdueTrancheCount(signal?: AbortSignal): Promise<AdminOverdueTrancheCount> {
+      return client.get<AdminOverdueTrancheCount>("/admin/overdue-tranches/count", { signal });
+    },
+
+    extendAdminOverdueTranche(
+      orderNo: number,
+      body: AdminOverdueExtendBody,
+    ): Promise<AdminOverdueActionResult> {
+      return client.post<AdminOverdueActionResult>(
+        `/admin/overdue-tranches/${String(orderNo)}/extend`,
+        { body },
+      );
+    },
+
+    openAdminOverdueDispute(
+      orderNo: number,
+      body: AdminOverdueDisputeBody,
+    ): Promise<AdminOverdueActionResult> {
+      return client.post<AdminOverdueActionResult>(
+        `/admin/overdue-tranches/${String(orderNo)}/dispute`,
+        { body },
+      );
     },
   };
 }

@@ -6,7 +6,7 @@ import { calculateQuote, isQuoteCalcError } from "@/shared/lib/quote";
 import { encodeQuoteId, MOCK_QUOTE_TTL_MS } from "@/shared/lib/quote-id";
 
 import { offerDetail } from "./offer-details";
-import { resolvePromo } from "./orders";
+import { mockPromoCodesEnabled, resolvePromo } from "./orders";
 
 /* Мок `POST /quotes` — один на всех.
 
@@ -45,6 +45,20 @@ export function mockQuote(request: QuoteRequest, nowMs: number = Date.now()): Qu
 
   // промокод проверяется до расчёта: неизвестный код — ошибка ввода, а не нулевая скидка
   const typedPromo = request.promo?.trim() ?? "";
+  // п. 10: флаг выключен — любой непустой код отклоняется тем же 422, что и у бэка
+  if (typedPromo.length > 0 && !mockPromoCodesEnabled()) {
+    throw new ApiError({
+      status: 422,
+      message: "Промокоды сейчас не принимаются",
+      problem: {
+        status: 422,
+        type: "https://partiya.ru/problems/quote/unknown_promo",
+        title: "Промокод не принят",
+        detail: "промокоды сейчас не принимаются",
+        errors: { promo: ["промокоды сейчас не принимаются"] },
+      },
+    });
+  }
   const promo = typedPromo.length > 0 ? resolvePromo(typedPromo) : undefined;
   if (typedPromo.length > 0 && !promo) {
     throw new ApiError({

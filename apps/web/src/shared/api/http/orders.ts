@@ -2,6 +2,7 @@ import type {
   AcceptOrderBody,
   ArtworkUploadRequest,
   ArtworkUploadResponse,
+  CancelOrderBody,
   CreateOrderDraftBody,
   CreateSampleBody,
   Order,
@@ -14,6 +15,7 @@ import type {
   SampleList,
   SampleOptions,
   SampleOrder,
+  SubmitOrderBody,
   SubmitOrderResponse,
   UpdateOrderDraftBody,
 } from "@partiya/api-contracts";
@@ -67,8 +69,16 @@ export function createOrdersHttpApi(client: HttpClient): OrdersApi {
       return client.request<void>("DELETE", `${path(id)}/artwork/${encodeURIComponent(fileId)}`);
     },
 
-    submitOrder(id: number, idempotencyKey: string): Promise<SubmitOrderResponse> {
-      return client.post<SubmitOrderResponse>(`${path(id)}/submit`, { idempotencyKey });
+    submitOrder(
+      id: number,
+      body: SubmitOrderBody,
+      idempotencyKey: string,
+    ): Promise<SubmitOrderResponse> {
+      return client.post<SubmitOrderResponse>(`${path(id)}/submit`, { body, idempotencyKey });
+    },
+
+    cancelOrder(id: number, body: CancelOrderBody): Promise<Order> {
+      return client.post<Order>(`${path(id)}/cancel`, { body });
     },
 
     approveArtwork(id: number): Promise<Order> {

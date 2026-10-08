@@ -1,5 +1,7 @@
 import type { DisputeResolution, Kopecks } from "@partiya/api-contracts";
 
+import { feeOf, PLATFORM_FEE_PERCENT } from "./fee";
+
 /* Распределение эскроу по решению оператора — ARCHITECTURE.md, раздел 9:
    «Решение — распределение суммы эскроу (100/0, 0/100, частично) → проводки в ledger».
 
@@ -10,8 +12,10 @@ import type { DisputeResolution, Kopecks } from "@partiya/api-contracts";
    Ни одна копейка не исчезает и не появляется. Комиссия берётся ТОЛЬКО с доли, которая
    осталась заводу (Q-194): при полном возврате платформа не зарабатывает.
 
-   Округление — вниз в пользу завода, как и у обычной выплаты (`platformFeeOf`): остаток
-   от деления уходит заводу, а не теряется. */
+   Комиссия — только со стоимости товара (DECISIONS.md, п. 2): доставка остаётся заводу
+   целиком и вычитается из его доли первой — `fee = 8 % × max(доля завода − доставка, 0)`
+   (`payments::dispute_split`, Q-341). Округление — `Money::percent` («от половины вверх»,
+   `shared/lib/fee.ts`); заводу уходит остаток вычитанием, поэтому сумма сходится всегда. */
 
 export interface EscrowDistribution {
   /** Сколько вернётся заказчику. */
@@ -22,19 +26,20 @@ export interface EscrowDistribution {
   fee: Kopecks;
 }
 
-/** Ставка комиссии платформы, % (ARCHITECTURE.md, 5.4). */
-export const DISPUTE_FEE_PERCENT = 8;
+/** Ставка комиссии платформы, % (ARCHITECTURE.md, 5.4) — та же, что у выплаты. */
+export const DISPUTE_FEE_PERCENT = PLATFORM_FEE_PERCENT;
 
 /**
  * @param total сумма в эскроу, копейки
  * @param resolution исход спора
  * @param refundAmount сумма частичного возврата; у остальных исходов игнорируется
+ * @param exempt необлагаемая часть — стоимость доставки из котировки
  */
 export function distributeEscrow(
   total: Kopecks,
   resolution: DisputeResolution,
   refundAmount: Kopecks | null = null,
-  feePercent: number = DISPUTE_FEE_PERCENT,
+  exempt: Kopecks = 0,
 ): EscrowDistribution {
   const safeTotal = Math.max(0, Math.round(total));
 
@@ -49,7 +54,7 @@ export function distributeEscrow(
       : 0;
 
   const factoryShare = safeTotal - refund;
-  const fee = Math.floor((factoryShare * feePercent) / 100);
+  const fee = feeOf(factoryShare, exempt, DISPUTE_FEE_PERCENT);
   return { customerAmount: refund, factoryAmount: factoryShare - fee, fee };
 }
 

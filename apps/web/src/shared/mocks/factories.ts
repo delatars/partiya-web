@@ -7,6 +7,8 @@ import type { FactoryBrief, FactoryDetail, FactorySummary } from "@partiya/api-c
    Волна — сквозной пример из mockups/lenta/data.js (`offerDetail.factory`), остальные
    расширяют выборку до объёма, на котором видно фильтры списка заводов. */
 
+/* `svechi` остаётся в справочнике специализаций (он же `SpecializationName` контракта и
+   CHECK бэка), хотя категорию «Свечи и декор» убрали и заводов с ней в фикстурах нет — Q-433. */
 export const SPECIALIZATIONS = {
   shveinoe: "Швейное производство",
   trikotazh: "Трикотаж",
@@ -78,26 +80,6 @@ export const FACTORIES = {
     onPlatformSince: "с мая 2025",
     about:
       "Вязание и пошив трикотажа: футер, кулирка, интерлок. Своя красильня, поэтому Pantone заказчика делаем от 500 шт.",
-  },
-  format: {
-    id: 24,
-    name: "Формат",
-    city: "Тула",
-    region: "cfo",
-    rating: 4.9,
-    reviews: 211,
-    audit: true,
-    specialization: "svechi",
-    since: 2017,
-    workers: 48,
-    capacityPerMonth: 18_000,
-    completedOrders: 143,
-    onTimePct: 99,
-    freeCapacityPct: 61,
-    respondsInMinutes: 25,
-    onPlatformSince: "с января 2025",
-    about:
-      "Свечи из соевого воска, гипсовые кашпо и саше. Своя лаборатория отдушек, разработка аромата под бренд за 10 рабочих дней.",
   },
   poshiv: {
     id: 29,

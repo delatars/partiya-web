@@ -13,7 +13,9 @@ import {
   QUOTE_KEYS,
   quoteOptions,
 } from "@/shared/api";
+import { promoCodesEnabled } from "@/shared/lib/features";
 import { formatNumber, formatRub } from "@/shared/lib/format";
+import { OFFER_VERSION } from "@/shared/lib/offer-terms";
 import { buildQuoteRequest } from "@/shared/lib/quote";
 import { useSession } from "@/shared/lib/session";
 import { AppLink, ErrorPage, useAppNavigate } from "@/shared/ui";
@@ -99,7 +101,10 @@ export function CheckoutPage({ search, onSearchChange }: CheckoutPageProps) {
     [search, order?.params.optionIds],
   );
   const deliveryId = search.delivery ?? order?.delivery?.optionId;
-  const promo = search.promo ?? order?.promo?.code;
+  // п. 10: промокоды выключены флагом — код из адреса или черновика в расчёт не идёт,
+  // иначе бэк ответил бы 422 `quote/unknown_promo` на каждый пересчёт
+  const promoEnabled = promoCodesEnabled();
+  const promo = promoEnabled ? (search.promo ?? order?.promo?.code) : undefined;
   const repeat = search.repeat ?? order?.repeat ?? false;
 
   const quoteRequest = useMemo(
@@ -189,7 +194,12 @@ export function CheckoutPage({ search, onSearchChange }: CheckoutPageProps) {
   const submit = useMutation({
     mutationFn: () => {
       if (!current) throw new Error("Черновик ещё не создан");
-      return getApiService().submitOrder(current.id, submitKey.current);
+      // п. 12: принятие оферты едет в теле — галочка и редакция, которую видел человек
+      return getApiService().submitOrder(
+        current.id,
+        { offerAccepted: accepted, offerVersion: OFFER_VERSION },
+        submitKey.current,
+      );
     },
     onSuccess: (result) => {
       queryClient.setQueryData(ORDER_KEYS.detail(result.order.id), result.order);
@@ -205,6 +215,17 @@ export function CheckoutPage({ search, onSearchChange }: CheckoutPageProps) {
       if (error.problem?.type?.endsWith("quote-expired") === true) {
         setExpired(true);
         setSubmitError(undefined);
+        return;
+      }
+      if (error.problem?.type?.endsWith("/orders/offer-not-accepted") === true) {
+        // галочка оферты живёт на шаге «Плательщик» — туда и ведём
+        setOpenStep("payer");
+        const fields = error.fieldErrors;
+        setSubmitError(
+          fields?.offerAccepted?.[0] ??
+            fields?.offerVersion?.[0] ??
+            "Без принятия договора-оферты заказ оформить нельзя.",
+        );
         return;
       }
       const fields = error.fieldErrors;
@@ -488,6 +509,7 @@ export function CheckoutPage({ search, onSearchChange }: CheckoutPageProps) {
           order={current}
           quote={quote}
           recalculating={quoteQuery.isFetching || patch.isPending}
+          promoEnabled={promoEnabled}
           promo={promo}
           promoError={promoError}
           promoPending={false}

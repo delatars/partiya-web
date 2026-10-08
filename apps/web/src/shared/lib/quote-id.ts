@@ -15,8 +15,12 @@ const PREFIX = "q1";
 const SEPARATOR = ".";
 const EMPTY = "_";
 
-/** Сколько живёт котировка мока. У бэка срок задаётся конфигом и приезжает в `validUntil`. */
-export const MOCK_QUOTE_TTL_MS = 30 * 60_000;
+/** Сколько дней живёт котировка — `quotes::QUOTE_TTL_DAYS` (DECISIONS.md, п. 11). Это же
+    число бэк отдаёт в `RepeatOrderResponse.priceLockedDays`. */
+export const QUOTE_TTL_DAYS = 14;
+
+/** Сколько живёт котировка мока. У бэка срок приезжает в `validUntil`. */
+export const MOCK_QUOTE_TTL_MS = QUOTE_TTL_DAYS * 24 * 60 * 60_000;
 
 export interface DecodedQuoteId {
   request: QuoteRequest;

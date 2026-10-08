@@ -22,6 +22,9 @@ import type { OrderEvent } from "./tracking";
      GET  /admin/payments/reconciliation  POST /admin/payments/deals/{id}/payout-confirmed
      GET/PUT /admin/taxonomy
      GET/PUT /admin/ranking
+     GET  /admin/stuck?kind&type&cursor   GET  /admin/stuck/{kind}/{id}
+     GET  /admin/stuck/count  (бейдж)     POST /admin/stuck/{kind}/{id}/retry
+                                          POST /admin/stuck/{kind}/{id}/resolve
 
    Четыре эндпоинта `payments` бэк уже реализовал — их типы скопированы из openapi.json
    без изменений (см. `AdminTrancheRow`, `AdminTranchesPage`, `ConfirmFundsRequest`,
@@ -545,7 +548,9 @@ export interface AdminRanking {
   appliedAt: string | null;
 }
 
-/** `PUT /admin/ranking` — применить веса. Сумма ≠ 100 даёт 422. */
+/** `PUT /admin/ranking` — применить веса. Сумма ≠ 100 даёт 422.
+    Набор полный: каждый `key` из `AdminRanking.weights` ровно один раз, вес 0..100
+    (иначе 422 `admin/weights-invalid`). Изменение пишется в аудит-лог (до/после). */
 export interface UpdateRankingBody {
   weights: { key: string; weight: number }[];
 }
@@ -573,6 +578,167 @@ export interface RankingPreview {
   moved: number;
 }
 
+/* ─────────────────────────────── зависшие ───────────────────────────────
+
+   Экран «Зависшие» (DECISIONS.md, п. 35): мёртвые фоновые задания и события, не
+   разосланные/не обработанные дольше минуты. Пушей нет — только бейдж в меню
+   (`GET /admin/stuck/count`) и сам экран. Типы — из openapi.json один в один. */
+
+/** Очередь: фоновое задание, доменное событие, входящий webhook. */
+export type AdminStuckKind = "job" | "outbox" | "inbox";
+
+/** Состояние строки. В ленте: `dead` у заданий, `pending` у событий и webhook-ов. */
+export type AdminStuckStatus = "dead" | "pending" | "running" | "done" | "resolved";
+
+/** Строка ленты (`AdminStuckRow` openapi). */
+export interface AdminStuckRow {
+  kind: AdminStuckKind;
+  id: string;
+  /** Тип задания (`order.confirm_deadline`), события (`order.status_changed`) или отправитель webhook-а (`bank`). */
+  type: string;
+  /** Агрегат события (`order:<uuid>`) или id webhook-а у отправителя; у задания — `null`. */
+  subject: string | null;
+  status: AdminStuckStatus;
+  attempts: number;
+  /** Лимит попыток задания; у событий и webhook-ов — `null`. */
+  maxAttempts: number | null;
+  /** В ленте — первые 300 символов, в карточке — целиком. */
+  lastError: string | null;
+  createdAt: string;
+  /** Когда воркер возьмёт строку снова; `null` — не возьмёт. */
+  nextAttemptAt: string | null;
+  resolvedAt: string | null;
+}
+
+/** `GET /admin/stuck/count` — бейдж в меню и вкладки экрана (`AdminStuckCount` openapi). */
+export interface AdminStuckCount {
+  total: number;
+  jobs: number;
+  outbox: number;
+  inbox: number;
+}
+
+/** `GET /admin/stuck` (`AdminStuckPage` openapi). */
+export interface AdminStuckPage {
+  items: AdminStuckRow[];
+  nextCursor: string | null;
+  /** Счётчики по очередям без учёта фильтров. */
+  counts: AdminStuckCount;
+}
+
+export interface AdminStuckQuery {
+  kind?: AdminStuckKind;
+  /** Точный тип, как в `AdminStuckRow.type`. */
+  type?: string;
+  cursor?: string;
+  /** 1..100, по умолчанию 20. */
+  limit?: number;
+}
+
+/** Действие оператора над строкой — из аудит-лога (`AdminStuckAction` openapi). */
+export interface AdminStuckAction {
+  at: string;
+  actorRef: string;
+  action: "stuck.retry" | "stuck.resolve";
+  comment: string | null;
+}
+
+/** `GET /admin/stuck/{kind}/{id}` — карточка (`AdminStuckCard` openapi). */
+export interface AdminStuckCard {
+  row: AdminStuckRow;
+  /** Payload как лежит в очереди (подпись webhook-а не отдаётся). */
+  payload: Record<string, unknown>;
+  lockedBy: string | null;
+  canRetry: boolean;
+  canResolve: boolean;
+  /** Новые сверху. */
+  actions: AdminStuckAction[];
+}
+
+/** Тело `POST /admin/stuck/{kind}/{id}/retry` и `/resolve` (`AdminStuckActionBody` openapi).
+ *  Для `resolve` комментарий обязателен (422 `admin/comment-required`). Ответ обоих — `AdminStuckCard`. */
+export interface AdminStuckActionBody {
+  comment?: string | null;
+}
+
+/* ─────────────── «Просроченные транши» (Q-401, вариант «в») ───────────────
+   Второй транш 50/50 не оплачен и после автопродления на 48 ч: заказ стоит на контроле
+   качества. Оператор продлевает срок или открывает спор от имени платформы.
+
+     GET  /admin/overdue-tranches                     → AdminOverdueTranchePage
+     GET  /admin/overdue-tranches/count               → AdminOverdueTrancheCount (бейдж)
+     POST /admin/overdue-tranches/{orderNo}/extend    → AdminOverdueActionResult
+     POST /admin/overdue-tranches/{orderNo}/dispute   → AdminOverdueActionResult */
+
+/** Как продлили срок счёта: `auto` — система на первой просрочке, `manual` — оператор. */
+export type AdminTrancheExtensionKind = "auto" | "manual";
+
+/** Строка истории сроков счёта (`AdminTrancheExtension` openapi). */
+export interface AdminTrancheExtension {
+  kind: AdminTrancheExtensionKind;
+  previousDueAt: string;
+  dueAt: string;
+  /** Обоснование оператора; у автопродления — `null`. */
+  comment: string | null;
+  at: string;
+}
+
+/** Строка очереди (`AdminOverdueTranche` openapi). */
+export interface AdminOverdueTranche {
+  /** Публичный номер заказа — им же ходят действия. */
+  orderNo: number;
+  orderTitle: string;
+  customerName: string;
+  factoryName: string;
+  /** Номер второго счёта строкой как есть. */
+  invoiceNumber: string;
+  /** Сумма второго транша. */
+  amount: Kopecks;
+  /** Сколько уже в эскроу (первый транш) — это и делит спор. */
+  heldAmount: Kopecks;
+  /** Последний (просроченный) срок оплаты. */
+  dueAt: string;
+  /** Когда счёт ушёл к оператору. */
+  overdueSince: string;
+  extensions: number;
+  history: AdminTrancheExtension[];
+}
+
+/** `GET /admin/overdue-tranches` (`AdminOverdueTranchePage` openapi). */
+export interface AdminOverdueTranchePage {
+  items: AdminOverdueTranche[];
+  count: number;
+}
+
+/** `GET /admin/overdue-tranches/count` — бейдж меню. */
+export interface AdminOverdueTrancheCount {
+  count: number;
+}
+
+/** Тело «Продлить»: часы 1–336, комментарий обязателен (422 `payments/extension-invalid`). */
+export interface AdminOverdueExtendBody {
+  hours: number;
+  comment: string;
+}
+
+/** Тело «Открыть спор»: комментарий обязателен (422 `admin/comment-required`). */
+export interface AdminOverdueDisputeBody {
+  comment: string;
+}
+
+export type AdminOverdueOutcome = "extended" | "dispute_opened";
+
+/** Ответ на «Продлить» и «Открыть спор». Счёт успели оплатить — 409
+    `payments/tranche-already-paid`. */
+export interface AdminOverdueActionResult {
+  orderNo: number;
+  outcome: AdminOverdueOutcome;
+  /** Новый срок (у продления). */
+  dueAt: string | null;
+  /** Открытый спор (у спора) — карточка в «Спорах». */
+  disputeId: string | null;
+}
+
 /* ─────────────────────────────── ошибки ─────────────────────────────── */
 
 /** Коды problem+json бэк-офиса. */
@@ -589,7 +755,21 @@ export type BackofficeProblemType =
   | "https://partiya.ru/problems/admin/amount-mismatch"
   /** 422 · сумма весов ранжирования не равна 100. */
   | "https://partiya.ru/problems/admin/weights-sum"
+  /** 409 · строка очереди уже не зависла (выполнена, разослана или решена раньше). */
+  | "https://partiya.ru/problems/admin/stuck-not-stuck"
+  /** 409 · строку прямо сейчас держит воркер — повторить через несколько секунд. */
+  | "https://partiya.ru/problems/admin/stuck-busy"
+  /** 422 · набор весов неполный или неверный: неизвестный, повторный или пропущенный
+      фактор, вес вне 0..100. Поля — `errors["weights.<key>"]`. */
+  | "https://partiya.ru/problems/admin/weights-invalid"
   /** 409 · счёт уже не ждёт оплаты. */
   | "https://partiya.ru/problems/payments/tranche-not-awaiting"
+  /** 409 · просроченный второй транш успели оплатить — заказ продолжает путь (Q-401). */
+  | "https://partiya.ru/problems/payments/tranche-already-paid"
+  /** 409 · счёт уже снят или не в очереди оператора (Q-401). */
+  | "https://partiya.ru/problems/payments/tranche-cancelled"
+  | "https://partiya.ru/problems/payments/tranche-not-overdue"
+  /** 422 · продление: часы вне 1–336 или нет комментария (Q-401). */
+  | "https://partiya.ru/problems/payments/extension-invalid"
   /** 422 · сумма поступления не совпала с суммой счёта (Q-192). */
   | "https://partiya.ru/problems/payments/amount_mismatch";

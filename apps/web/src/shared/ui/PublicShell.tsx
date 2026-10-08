@@ -13,7 +13,7 @@ import { ArrowLeftRight, Bell, Heart, Package, User } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import { CATEGORIES, categoryHref } from "@/shared/lib/categories";
+import { CATEGORIES, categoryHref, MENU_CATEGORY_LIMIT } from "@/shared/lib/categories";
 import { useUserCounters } from "@/shared/lib/counters";
 import { homePathFor } from "@/shared/lib/guards";
 import { useSession } from "@/shared/lib/session";
@@ -23,7 +23,7 @@ import { AppLink, parseHref, RouterLink, useAppNavigate } from "@/shared/ui/rout
 /* Макет: header() + .menu + .tray + footer(). Один каркас на все публичные страницы,
    включая 404 и экран ошибки, — поэтому он здесь, а не внутри layout-маршрута. */
 
-const SEARCH_PLACEHOLDER = "Что произвести? футболки, худи, свечи, БАДы, металлокаркас…";
+const SEARCH_PLACEHOLDER = "Что произвести? футболки, худи, шоперы, металлокаркас…";
 
 /** Ссылка на вход с возвратом туда, куда человек нажал. */
 function loginHref(target: string): string {
@@ -153,8 +153,10 @@ export function PublicShell({
       : { key: "login", label: "Войти", icon: <User className="size-5" />, href: "/login" },
   ];
 
+  /* В полосу меню — первые корни по порядку таксономии; все 28 — плитками в каталоге и
+     в выпадающем списке поиска (Q-418). */
   const menuItems = [
-    ...CATEGORIES.map((item) => ({
+    ...CATEGORIES.slice(0, MENU_CATEGORY_LIMIT).map((item) => ({
       key: item.slug,
       label: item.title,
       href: categoryHref([item.slug]),

@@ -2,6 +2,7 @@ import type {
   AcceptOrderBody,
   ArtworkUploadRequest,
   ArtworkUploadResponse,
+  CancelOrderBody,
   CreateOrderDraftBody,
   CreateSampleBody,
   Order,
@@ -14,6 +15,7 @@ import type {
   SampleList,
   SampleOptions,
   SampleOrder,
+  SubmitOrderBody,
   SubmitOrderResponse,
   UpdateOrderDraftBody,
 } from "@partiya/api-contracts";
@@ -57,8 +59,19 @@ export interface OrdersApi {
   deleteArtwork(id: number, fileId: string): Promise<void>;
 
   /** `POST /orders/{id}/submit` → 200: документы и платёжные инструкции.
-      Шаги заполнены не полностью — 422, котировка истекла — 409. */
-  submitOrder(id: number, idempotencyKey: string): Promise<SubmitOrderResponse>;
+      Тело — принятие оферты (DECISIONS.md, п. 12): без `offerAccepted: true` и версии —
+      422 `orders/offer-not-accepted`. Шаги заполнены не полностью — 422, котировка
+      истекла — 409. */
+  submitOrder(
+    id: number,
+    body: SubmitOrderBody,
+    idempotencyKey: string,
+  ): Promise<SubmitOrderResponse>;
+
+  /** `POST /orders/{id}/cancel` → 200 с заказом в статусе `cancelled` (п. 17): только
+      черновик или неоплаченный счёт. Деньги уже поступили — 409 `orders/cancel-after-payment`;
+      повтор по отменённому — 200. */
+  cancelOrder(id: number, body: CancelOrderBody): Promise<Order>;
 
   /** `POST /orders/{id}/artwork/approve` → 200. Команда `ApproveArtwork` автомата:
       макет и цветопробу согласовывает заказчик (Q-02). Не тот статус — 409. */

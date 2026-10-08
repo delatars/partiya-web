@@ -1,6 +1,8 @@
 import type {
   AdvanceStageBody,
   AnswerBody,
+  ArtworkSignoff,
+  MarkDeliveredBody,
   CapacityCell,
   CapacityPlan,
   CapacityQuery,
@@ -74,7 +76,17 @@ import {
 
 import { ARTWORK_LIMITS } from "../lib/artwork";
 import type { MockState } from "./mock-backend";
-import { PLATFORM_FEE_PERCENT, platformFeeOf } from "./mock-projections";
+import {
+  finalPaymentOf,
+  issueSecondTranche,
+  markOrderDelivered,
+  normalizeTrackingNumber,
+  orderFeeOf,
+  orderPayoutOf,
+  PLATFORM_FEE_PERCENT,
+  settleSecondTranche,
+  signArtwork,
+} from "./mock-projections";
 import type { MockOrder, NewOrderEvent } from "./mock-seed";
 import {
   CAPACITY_LINES,
@@ -165,8 +177,11 @@ const transitionNotAllowed = (detail: string) =>
 
 /* ─────────────────────────────── ступени завода ─────────────────────────────── */
 
-/** Ступень вкладки по статусу автомата (Q-01: `shipped` — добавленная пятая). */
-export function sellerStageOf(status: OrderStatus): SellerStage | null {
+/** Ступень вкладки по статусу автомата (Q-01: `shipped` — добавленная пятая).
+ *
+ * Q-335 / Q-353: `completed` делится на две ступени по отметке выплаты — `accepted`
+ * («Принят заказчиком»: приёмка состоялась, оператор ещё не выплатил) и `paid_out`. */
+export function sellerStageOf(status: OrderStatus, paidOut = false): SellerStage | null {
   switch (status) {
     case "awaiting_confirmation":
       return "new";
@@ -182,7 +197,7 @@ export function sellerStageOf(status: OrderStatus): SellerStage | null {
     case "dispute":
       return "shipped";
     case "completed":
-      return "paid_out";
+      return paidOut ? "paid_out" : "accepted";
     default:
       // черновик, ожидание оплаты, отказ и возвраты заводу не показываются
       return null;
@@ -194,26 +209,61 @@ export const SELLER_STAGE_TITLES: Record<SellerStage, string> = {
   in_production: "В производстве",
   quality_control: "Контроль качества",
   shipped: "Отгружен",
+  accepted: "Принят заказчиком",
   paid_out: "Выплачено",
 };
 
-/** Какие команды автомата доступны заводу из этого статуса. */
-export function commandsFor(status: OrderStatus): SellerStageCommand[] {
+/** Ступень заказа завода с учётом отметки выплаты. */
+export function sellerStageOfOrder(order: Pick<MockOrder, "status" | "payoutAt">) {
+  return sellerStageOf(order.status, order.payoutAt != null);
+}
+
+/** Подписи под макетом: у заказа без поля — никто ещё не подписал. */
+export function signoffOf(order: Pick<MockOrder, "artworkSignoff">): ArtworkSignoff {
+  return order.artworkSignoff ?? { customerApprovedAt: null, factoryApprovedAt: null };
+}
+
+/** Какие команды автомата доступны заводу из этого статуса.
+    DECISIONS.md, п. 16: на согласовании макета технолог подписывает производимость
+    (`approve_artwork`), пока он ещё не подписал; порядок подписей сторон любой. */
+export function commandsFor(
+  status: OrderStatus,
+  signoff?: ArtworkSignoff,
+  awaitingFinalPayment = false,
+): SellerStageCommand[] {
   switch (status) {
     case "confirmed":
       return ["start_artwork_review"];
+    case "artwork_review":
+      return (signoff?.factoryApprovedAt ?? null) === null ? ["approve_artwork"] : [];
     case "materials":
       return ["materials_purchased"];
     case "in_production":
       return ["start_quality_control"];
     case "quality_control":
-      return ["ship"];
+      // 50/50: отгрузка — только после оплаты второго транша (409 ship-before-final-payment)
+      return awaitingFinalPayment ? [] : ["ship"];
     default:
       return [];
   }
 }
 
-const COMMAND_TARGET: Record<SellerStageCommand, { from: OrderStatus; to: OrderStatus }> = {
+/** 50/50: второй транш выставлен, но ещё не оплачен — отгружать нельзя. */
+export function awaitingFinalPayment(
+  order: Pick<MockOrder, "paymentMethod" | "secondTrancheDueAt" | "secondTranchePaidAt">,
+): boolean {
+  return (
+    order.paymentMethod === "escrow_split_50_50" &&
+    order.secondTrancheDueAt != null &&
+    order.secondTranchePaidAt == null
+  );
+}
+
+/** Переходы команд. `approve_artwork` здесь нет: статус она меняет только второй подписью. */
+const COMMAND_TARGET: Record<
+  Exclude<SellerStageCommand, "approve_artwork">,
+  { from: OrderStatus; to: OrderStatus }
+> = {
   start_artwork_review: { from: "confirmed", to: "artwork_review" },
   materials_purchased: { from: "materials", to: "in_production" },
   start_quality_control: { from: "in_production", to: "quality_control" },
@@ -222,6 +272,7 @@ const COMMAND_TARGET: Record<SellerStageCommand, { from: OrderStatus; to: OrderS
 
 export const COMMAND_TITLES: Record<SellerStageCommand, string> = {
   start_artwork_review: "Отправить макет технологу",
+  approve_artwork: "Согласовать макет",
   materials_purchased: "Сырьё закуплено — старт производства",
   start_quality_control: "Перевести в «Контроль качества»",
   ship: "Отгрузить партию",
@@ -279,6 +330,7 @@ export interface MockSellerSlice {
   ): Promise<SellerOrder>;
   reportSellerProgress(id: number, body: ReportProgressBody): Promise<SellerOrder>;
   advanceSellerStage(id: number, body: AdvanceStageBody): Promise<SellerOrder>;
+  markSellerOrderDelivered(id: number, body: MarkDeliveredBody): Promise<SellerOrder>;
   requestPhotoReportUpload(
     id: number,
     body: PhotoReportUploadRequest,
@@ -456,7 +508,7 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
           ? "приёмка идёт"
           : `приёмка ${formatIsoDate(order.shipDate) ?? ""}`;
       case "completed":
-        return formatRub(order.quote.total - platformFeeOf(order.quote.total));
+        return formatRub(orderPayoutOf(order));
       case "quality_control":
         return "выборка 5 % по ГОСТ";
       default:
@@ -465,11 +517,11 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
   }
 
   function toSellerListItem(order: MockOrder): SellerOrderListItem {
-    const fee = platformFeeOf(order.quote.total);
+    const fee = orderFeeOf(order);
     return {
       id: order.id,
       status: order.status,
-      sellerStage: sellerStageOf(order.status),
+      sellerStage: sellerStageOfOrder(order),
       title: order.offer.title,
       customer: order.payer?.name ?? "Заказчик",
       customerOrgId: order.orgId,
@@ -519,7 +571,7 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
 
   function summaryOf(orders: readonly MockOrder[]): SellerOrderSummary {
     const byStage = (stage: SellerStage) =>
-      orders.filter((order) => sellerStageOf(order.status) === stage).length;
+      orders.filter((order) => sellerStageOfOrder(order) === stage).length;
     const awaiting = orders.filter((order) => order.status === "awaiting_confirmation");
     const deadlines = awaiting
       .map((order) => order.confirmDeadlineAt)
@@ -529,7 +581,8 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
       (order) =>
         order.paidAt !== null && order.status !== "completed" && order.status !== "refunded",
     );
-    const payable = orders.filter((order) => order.status === "completed");
+    // к выплате — принятые заказчиком, но ещё не выплаченные оператором (Q-353)
+    const payable = orders.filter((order) => sellerStageOfOrder(order) === "accepted");
 
     return {
       all: orders.length,
@@ -537,19 +590,17 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
       inProduction: byStage("in_production"),
       qualityControl: byStage("quality_control"),
       shipped: byStage("shipped"),
+      accepted: byStage("accepted"),
       paidOut: byStage("paid_out"),
       awaitingConfirmation: awaiting.length,
       nearestConfirmDeadlineAt: deadlines[0] ?? null,
       escrowHeld: held.reduce((sum, order) => sum + order.quote.total, 0),
-      payoutPlanned: payable.reduce(
-        (sum, order) => sum + order.quote.total - platformFeeOf(order.quote.total),
-        0,
-      ),
+      payoutPlanned: payable.reduce((sum, order) => sum + orderPayoutOf(order), 0),
     };
   }
 
   function toSellerOrder(order: MockOrder): SellerOrder {
-    const fee = platformFeeOf(order.quote.total);
+    const fee = orderFeeOf(order);
     const rows = progressRows(order.id);
     const lastProgress =
       rows
@@ -562,7 +613,7 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
     return {
       id: order.id,
       status: order.status,
-      sellerStage: sellerStageOf(order.status),
+      sellerStage: sellerStageOfOrder(order),
       title: order.offer.title,
       customer: order.payer?.name ?? "Заказчик",
       customerOrgId: order.orgId,
@@ -584,11 +635,14 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
         fee,
         feePercent: PLATFORM_FEE_PERCENT,
         payout: order.quote.total - fee,
-        payoutAt: order.status === "completed" ? (order.acceptedAt ?? null) : null,
+        // Q-353: момент выплаты оператором, а не приёмки
+        payoutAt: order.payoutAt ?? null,
         note:
-          order.status === "completed"
+          order.payoutAt != null
             ? "выплата отправлена после приёмки заказчиком"
-            : "Выплата — в течение 2 рабочих дней после приёмки партии заказчиком.",
+            : order.status === "completed"
+              ? "Партия принята заказчиком — выплата в течение 2 рабочих дней."
+              : "Выплата — в течение 2 рабочих дней после приёмки партии заказчиком. Комиссия — только со стоимости товара, доставка без комиссии.",
         blockedByDispute: disputeOpen,
       },
       confirmDeadlineAt: order.confirmDeadlineAt,
@@ -598,14 +652,27 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
           ? null
           : Math.max(1, Math.round((now() - started) / 86_400_000)),
       productionDays: order.quote.leadDays ?? null,
-      availableCommands: disputeOpen ? [] : commandsFor(order.status),
+      availableCommands: disputeOpen
+        ? []
+        : commandsFor(order.status, order.artworkSignoff, awaitingFinalPayment(order)),
       canConfirm: order.status === "awaiting_confirmation",
       canDecline: order.status === "awaiting_confirmation",
+      canMarkDelivered: order.status === "shipped" && !disputeOpen,
+      trackingNumber: order.trackingNumber ?? null,
+      artworkSignoff: signoffOf(order),
       progressUpdatedAt: lastProgress,
       unreadMessages: ctx.unreadOf(order.id),
       disputeOpen,
       createdAt: order.createdAt,
       updatedAt: order.updatedAt,
+      // Q-383, Q-401: заводу — состояние второго транша без реквизитов; как у бэка, только
+      // на контроле качества, в споре и после отгрузки
+      finalPayment:
+        order.status === "quality_control" ||
+        order.status === "dispute" ||
+        order.status === "shipped"
+          ? finalPaymentOf(order, false)
+          : null,
     };
   }
 
@@ -922,7 +989,7 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
         const unanswered = store.questions.filter((item) => item.answer === null).length;
         const paidMonth = orders
           .filter((order) => order.status === "completed")
-          .reduce((sum, order) => sum + order.quote.total - platformFeeOf(order.quote.total), 0);
+          .reduce((sum, order) => sum + orderPayoutOf(order), 0);
 
         const todo: SellerDashboard["todo"] = [];
         if (urgent) {
@@ -1014,9 +1081,7 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
         const { orgId } = await requireFactoryOrg();
         const all = ordersOfFactory(orgId);
         const items = all
-          .filter(
-            (order) => query.stage === undefined || sellerStageOf(order.status) === query.stage,
-          )
+          .filter((order) => query.stage === undefined || sellerStageOfOrder(order) === query.stage)
           .map(toSellerListItem);
         return { items, total: items.length, summary: summaryOf(all) };
       });
@@ -1025,6 +1090,8 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
     getSellerOrder(id: number): Promise<SellerOrder> {
       return respond(async () => {
         const order = await requireFactoryOrder(id);
+        // Q-401: таймер срока второго транша — у мока лениво, при чтении
+        settleSecondTranche(order, now(), ctx.emit);
         return toSellerOrder(order);
       });
     },
@@ -1172,6 +1239,27 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
       return respond(async () => {
         const { orgId } = await requireFactoryOrg();
         const order = await requireFactoryOrder(id);
+        if (body.command === "approve_artwork") {
+          // п. 16 / Q-354: подпись технолога — производимость; статус меняет вторая подпись
+          if (order.status !== "artwork_review") {
+            throw problem(
+              409,
+              "https://partiya.ru/problems/orders/transition-not-allowed",
+              "Переход невозможен",
+              `Макет согласуют на шаге «${orderStatusTitle("artwork_review")}», сейчас — «${orderStatusTitle(order.status)}».`,
+            );
+          }
+          signArtwork(
+            order,
+            "factory",
+            new Date(now()).toISOString(),
+            factoryActor(order, orgId),
+            ctx.emit,
+          );
+          ctx.touch(order);
+          save();
+          return toSellerOrder(order);
+        }
         const target = COMMAND_TARGET[body.command] as
           { from: OrderStatus; to: OrderStatus } | undefined;
         if (!target) {
@@ -1180,6 +1268,14 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
         if (order.status !== target.from) {
           throw transitionNotAllowed(
             `Команда «${COMMAND_TITLES[body.command]}» применима из статуса «${orderStatusTitle(target.from)}», сейчас — «${orderStatusTitle(order.status)}».`,
+          );
+        }
+        if (body.command === "ship" && awaitingFinalPayment(order)) {
+          throw problem(
+            409,
+            "https://partiya.ru/problems/orders/ship-before-final-payment",
+            "Ждём оплату второго транша",
+            "Схема 50/50: отгрузить партию можно после оплаты второго транша заказчиком.",
           );
         }
         const occurredAt = new Date(now()).toISOString();
@@ -1230,26 +1326,48 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
             detail: "без подписи выплата не уйдёт",
             document: upd,
           });
-          /* ⚠ Допущение Q-S1: у бэка `shipped → acceptance` делает webhook логистики
-             (Q-02, `Delivered` — система). Фонового задания в моках нет, поэтому доставка
-             отмечается тем же вызовом, отдельным событием и от лица системы: иначе окно
-             приёмки у заказчика не открылось бы никогда. */
-          const deliveredAt = new Date(now() + 1000).toISOString();
-          order.status = "acceptance";
-          order.deliveredAt = deliveredAt;
-          ctx.touch(order);
-          ctx.emit(order.id, {
-            type: "status_changed",
-            orderId: order.id,
-            occurredAt: deliveredAt,
-            actor: system,
-            title: "Партия доставлена",
-            detail: "открыто окно приёмки: 5 рабочих дней",
-            from: "shipped",
-            to: "acceptance",
-            stage: customerStageOf("acceptance"),
-          });
+          /* DECISIONS.md, п. 13: «Доставлено» фиксирует завод по трек-номеру
+             (`POST /seller/orders/{id}/delivered`), запасной путь — кнопка оператора.
+             Отгрузка сама окно приёмки больше не открывает. */
         }
+        // п. 4 / Q-342: «готов к отгрузке» — второй транш 50/50 выставляется сейчас
+        if (target.to === "quality_control") issueSecondTranche(order, occurredAt, ctx.emit);
+        save();
+        return toSellerOrder(order);
+      });
+    },
+
+    markSellerOrderDelivered(id: number, body: MarkDeliveredBody): Promise<SellerOrder> {
+      return respond(async () => {
+        const { orgId } = await requireFactoryOrg();
+        const order = await requireFactoryOrder(id);
+        const trackingNumber = normalizeTrackingNumber(body.trackingNumber);
+        if (trackingNumber === null) {
+          throw problem(
+            422,
+            `${P}/invalid-tracking-number`,
+            "Трек-номер не подходит",
+            "Укажите трек-номер перевозчика: от 1 до 64 символов.",
+            { trackingNumber: ["Трек-номер — от 1 до 64 символов"] },
+          );
+        }
+        if (ctx.disputeOpen(order.id)) {
+          throw transitionNotAllowed("По заказу открыт спор — доставку отметит оператор.");
+        }
+        if (order.status !== "shipped") {
+          // Q-350: повтор — 409, как у бэка
+          throw transitionNotAllowed(
+            `«Доставлено» отмечают у отгруженной партии, сейчас — «${orderStatusTitle(order.status)}».`,
+          );
+        }
+        markOrderDelivered(
+          order,
+          new Date(now()).toISOString(),
+          factoryActor(order, orgId),
+          trackingNumber,
+          ctx.emit,
+        );
+        ctx.touch(order);
         save();
         return toSellerOrder(order);
       });
@@ -1526,14 +1644,8 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
         const store = storeOf(orgId);
         const summary = summaryOf(orders);
         const completed = orders.filter((order) => order.status === "completed");
-        const paidTotal = completed.reduce(
-          (sum, order) => sum + order.quote.total - platformFeeOf(order.quote.total),
-          0,
-        );
-        const feeWithheld = completed.reduce(
-          (sum, order) => sum + platformFeeOf(order.quote.total),
-          0,
-        );
+        const paidTotal = completed.reduce((sum, order) => sum + orderPayoutOf(order), 0);
+        const feeWithheld = completed.reduce((sum, order) => sum + orderFeeOf(order), 0);
         const next = orders.find((order) => order.status === "acceptance");
 
         return {
@@ -1542,8 +1654,7 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
           paidTotal,
           feeWithheld,
           feePercent: PLATFORM_FEE_PERCENT,
-          nextPayoutAmount:
-            next === undefined ? 0 : next.quote.total - platformFeeOf(next.quote.total),
+          nextPayoutAmount: next === undefined ? 0 : orderPayoutOf(next),
           nextPayoutAt: next?.shipDate ?? null,
           payoutAccount: store.profile.payoutAccount,
           escrowOrders: orders
@@ -1569,7 +1680,7 @@ export function createSellerSlice(ctx: SellerContext): MockSellerSlice {
         const items: SellerPayout[] = ordersOfFactory(orgId)
           .filter((order) => order.paidAt !== null && order.status !== "awaiting_confirmation")
           .map((order) => {
-            const fee = platformFeeOf(order.quote.total);
+            const fee = orderFeeOf(order);
             const released = order.status === "completed";
             return {
               dealId: `deal-${String(order.id)}`,

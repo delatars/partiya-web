@@ -341,6 +341,20 @@ export interface Order {
   repeatOfOrderId?: number | null;
   /** Непрочитанных сообщений чата — бейдж на вкладке и в списке заказов. */
   unreadMessages?: number;
+  /** Трек-номер доставки: его вводит завод, отмечая «Доставлено» (DECISIONS.md, п. 13).
+      `null` — завод ещё не отметил доставку (или её отметил оператор). */
+  trackingNumber?: string | null;
+  /** Подписи сторон под макетом печати (п. 16): заказ уходит в `materials` после обеих. */
+  artworkSignoff?: ArtworkSignoff;
+  /** Можно ли отменить заказ самому (п. 17): черновик или неоплаченный счёт. */
+  canCancel?: boolean;
+}
+
+/** Подписи сторон под макетом печати (DECISIONS.md, п. 16): технолог завода —
+    производимость, заказчик — визуал. RFC 3339; `null` — сторона ещё не подписала. */
+export interface ArtworkSignoff {
+  customerApprovedAt: string | null;
+  factoryApprovedAt: string | null;
 }
 
 /* ─────────────────────────────── приёмка ───────────────────────────────
@@ -538,6 +552,24 @@ export interface SubmitOrderResponse {
   payment: PaymentInstructions;
 }
 
+/** `POST /orders/{id}/submit` — тело с принятием оферты (DECISIONS.md, п. 12).
+ *
+ * Время принятия ставит сервер, IP и браузер он берёт из заголовков; браузер сообщает
+ * только, какую версию оферты видел человек. Без `offerAccepted: true` — 422
+ * `orders/offer-not-accepted` с `errors.offerAccepted` / `errors.offerVersion`. */
+export interface SubmitOrderBody {
+  offerAccepted: boolean;
+  /** Версия текста оферты: «2026-10-01» (латиница, цифры, `.-_`, до 64 символов). */
+  offerVersion: string;
+}
+
+/** `POST /orders/{id}/cancel` — отмена заказчиком до оплаты (DECISIONS.md, п. 17).
+    Ответ — `Order` в статусе `cancelled`. После оплаты — 409 `orders/cancel-after-payment`. */
+export interface CancelOrderBody {
+  /** Причина — уходит в журнал заказа. */
+  reason?: string | null;
+}
+
 /* ─────────────────────────────── ошибки ───────────────────────────────
 
    RFC 7807; `type` — стабильный URI, по нему экран и различает случаи (`title` и
@@ -574,4 +606,11 @@ export type OrderProblemType =
   /** 409 · повторить можно только завершённый заказ. */
   | "https://partiya.ru/problems/orders/repeat-not-allowed"
   /** 409 · предложение снято с публикации — повторить партию нечем. */
-  | "https://partiya.ru/problems/orders/offer-unavailable";
+  | "https://partiya.ru/problems/orders/offer-unavailable"
+  /** 422 · оферта не принята или не указана её версия (п. 12); `errors` — по полям. */
+  | "https://partiya.ru/problems/orders/offer-not-accepted"
+  /** 409 · деньги уже поступили — отменить можно только через оператора (п. 17). */
+  | "https://partiya.ru/problems/orders/cancel-after-payment"
+  /** 409 · из этого статуса команда не применима (например, подпись макета не на
+      согласовании). */
+  | "https://partiya.ru/problems/orders/transition-not-allowed";

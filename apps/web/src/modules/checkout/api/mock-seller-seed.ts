@@ -16,6 +16,7 @@ import type {
 import { addWorkingDays, formatDayMonth } from "@/shared/lib/dates";
 import { DEMO_BUYER_NAMES, DEMO_BUYER_ORG_IDS, DEMO_ORG_IDS } from "@/shared/lib/demo";
 import { customerStageOf, orderBucketOf } from "@/shared/lib/order-status";
+import { feeOf } from "@/shared/lib/fee";
 import { encodeQuoteId } from "@/shared/lib/quote-id";
 import { FACTORIES, requireMockOffer } from "@/shared/mocks";
 
@@ -51,6 +52,9 @@ interface FactorySeed {
   total: Kopecks;
   unitPrice: Kopecks;
   shipDate: string | null;
+  /** Схема 50/50 (п. 4). Сколько дней назад истёк первый срок второго транша — таймер
+      мока «досчитает» продление и передачу оператору при первом чтении (Q-401). */
+  split?: { dueDaysAgo: number };
 }
 
 const FACTORY_SEEDS: FactorySeed[] = [
@@ -78,6 +82,21 @@ const FACTORY_SEEDS: FactorySeed[] = [
     total: rub(405_000),
     unitPrice: rub(135),
     shipDate: null,
+  },
+  {
+    // Q-401: второй транш 50/50 не оплачен и после автопродления — заказ у оператора
+    // («Просроченные транши»); завод видит «передано оператору»
+    id: 4795,
+    offerId: 2231,
+    title: "Футболки 2 000 шт",
+    qty: 2000,
+    buyerOrgId: DEMO_BUYER_ORG_IDS.safonov,
+    status: "quality_control",
+    daysAgo: 16,
+    total: rub(270_000),
+    unitPrice: rub(135),
+    shipDate: "2026-10-05",
+    split: { dueDaysAgo: 3 },
   },
   {
     id: 4771,
@@ -130,9 +149,6 @@ function at(nowMs: number, daysAgo: number, time: string): string {
   date.setHours(Number(hours ?? 0), Number(minutes ?? 0), 0, 0);
   return date.toISOString();
 }
-
-/** Комиссия платформы — та же ставка, что в проекциях заказа. */
-const FEE_PERCENT = 8;
 
 export interface SeededFactory {
   orders: MockOrder[];
@@ -191,11 +207,13 @@ export function seedFactoryOrders(nowMs: number): SeededFactory {
           title: "Оплата зарезервирована в эскроу",
           detail: null,
           operation: "hold",
-          amount: seed.total,
+          // 50/50: при запуске — первая половина (вверх, как у бэка)
+          amount: seed.split === undefined ? seed.total : Math.ceil(seed.total / 2),
         });
       }
       if (status === "completed") {
-        const fee = Math.floor((seed.total * FEE_PERCENT) / 100);
+        // п. 2: комиссия только со стоимости товара (доставка в снимке котировки — 0)
+        const fee = feeOf(seed.total, seed.id === 4811 ? rub(9_400) : 0);
         seq += 1;
         journal.push({
           type: "money",
@@ -266,9 +284,10 @@ export function seedFactoryOrders(nowMs: number): SeededFactory {
         total: seed.total,
         leadDays: 18,
         shipDate: seed.shipDate ?? undefined,
-        validUntil: new Date(submittedMs + 30 * 24 * 60 * 60_000).toISOString(),
+        // DECISIONS.md, п. 11: котировка живёт 14 дней
+        validUntil: new Date(submittedMs + 14 * 24 * 60 * 60_000).toISOString(),
       },
-      quoteValidUntil: new Date(submittedMs + 30 * 24 * 60 * 60_000).toISOString(),
+      quoteValidUntil: new Date(submittedMs + 14 * 24 * 60 * 60_000).toISOString(),
       repeat: false,
       promo: null,
       params: seed.id === 4811 ? { ...params, optionIds: ["extra-print-color"] } : params,
@@ -353,8 +372,26 @@ export function seedFactoryOrders(nowMs: number): SeededFactory {
       shipDate: seed.shipDate,
       deliveredAt: deliveredAt ?? null,
       acceptedAt: acceptedAt ?? null,
+      // давняя завершённая партия уже выплачена оператором (ступень «Выплачено», Q-353)
+      payoutAt:
+        acceptedAt === undefined
+          ? null
+          : new Date(Date.parse(acceptedAt) + 2 * 24 * 60 * 60_000).toISOString(),
+      trackingNumber: deliveredAt === undefined ? null : `WB-${no}-0917`,
+      artworkSignoff:
+        PATH.indexOf(seed.status) > PATH.indexOf("artwork_review")
+          ? { customerApprovedAt: submittedAt, factoryApprovedAt: submittedAt }
+          : { customerApprovedAt: null, factoryApprovedAt: null },
       repeatDiscountPercent: null,
       repeatOfOrderId: null,
+      ...(seed.split === undefined
+        ? {}
+        : {
+            paymentMethod: "escrow_split_50_50" as const,
+            secondTrancheDueAt: at(nowMs, seed.split.dueDaysAgo, "14:30"),
+            secondTranchePaidAt: null,
+            secondTrancheExtensions: 0,
+          }),
     });
 
     events[no] = journal;
