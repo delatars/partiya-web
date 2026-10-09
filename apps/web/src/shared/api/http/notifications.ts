@@ -44,6 +44,10 @@ export function createNotificationsHttpApi(client: HttpClient, baseUrl: string):
       return client.request<NotificationSettings>("PUT", "/me/notification-settings", { body });
     },
 
+    disconnectTelegram(): Promise<NotificationSettings> {
+      return client.request<NotificationSettings>("DELETE", "/me/notification-settings/telegram");
+    },
+
     getUserCounters(signal?: AbortSignal): Promise<UserCounters> {
       return client.get<UserCounters>("/me/counters", { signal });
     },

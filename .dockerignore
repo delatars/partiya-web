@@ -1,0 +1,15 @@
+# Контекст сборки: исходники воркспейса без установленных зависимостей и артефактов.
+**/node_modules
+**/dist
+**/.turbo
+**/.tanstack
+**/*.tsbuildinfo
+**/coverage
+.git
+.github
+e2e/playwright-report
+e2e/test-results
+mockups
+Dockerfile
+.dockerignore
+.env*

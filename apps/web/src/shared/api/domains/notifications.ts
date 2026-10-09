@@ -34,6 +34,9 @@ export interface NotificationsApi {
   /** `PUT /me/notification-settings` → 200. */
   updateNotificationSettings(body: UpdateNotificationSettingsBody): Promise<NotificationSettings>;
 
+  /** `DELETE /me/notification-settings/telegram` → 200 с настройками: отвязать чат Telegram. */
+  disconnectTelegram(): Promise<NotificationSettings>;
+
   /** `GET /me/counters` → 200. Счётчики шапки и сайдбара. */
   getUserCounters(signal?: AbortSignal): Promise<UserCounters>;
 

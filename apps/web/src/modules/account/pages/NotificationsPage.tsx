@@ -47,6 +47,25 @@ export function NotificationsPage() {
     },
   });
 
+  const disconnectTelegram = useMutation({
+    mutationFn: () => getApiService().disconnectTelegram(),
+    onSuccess: (settings) => {
+      queryClient.setQueryData(NOTIFICATION_KEYS.settings(), settings);
+    },
+  });
+
+  const settings = settingsQuery.data;
+  /* Каналы, которые сервер не умеет доставлять: переключатель хранится, но писем нет.
+     Поле необязательное (старый бэк его не отдаёт) — тогда молчим, а не пугаем. */
+  const available: Record<NotificationChannel, boolean | undefined> = {
+    email: settings?.emailAvailable,
+    telegram: settings?.telegramAvailable,
+    sms: settings?.smsAvailable,
+  };
+  const unavailable = CHANNELS.filter((channel) => available[channel.key] === false).map(
+    (channel) => channel.label,
+  );
+
   const items = query.data?.items ?? [];
   const unread = query.data?.unread ?? 0;
   const days = groupNotifications(items);
@@ -146,13 +165,28 @@ export function NotificationsPage() {
               </tbody>
             </table>
           )}
-          {settingsQuery.data?.telegramConnected === false && (
-            <Button asChild className="mt-2.5 w-full">
-              <a
-                href={settingsQuery.data.telegramConnectUrl ?? "#"}
-                target="_blank"
-                rel="noreferrer"
+          {unavailable.length > 0 && (
+            <p className="text-muted mt-2 text-[12.5px]">
+              Пока не отправляется: {unavailable.join(", ")}. Настройки сохранятся и заработают,
+              когда канал подключат.
+            </p>
+          )}
+          {settings?.telegramConnected === true && (
+            <div className="mt-2.5 flex items-center justify-between gap-2 text-[13px]">
+              <span>Telegram подключён</span>
+              <Button
+                disabled={disconnectTelegram.isPending}
+                onClick={() => {
+                  disconnectTelegram.mutate();
+                }}
               >
+                Отключить
+              </Button>
+            </div>
+          )}
+          {settings?.telegramConnected === false && settings.telegramConnectUrl != null && (
+            <Button asChild className="mt-2.5 w-full">
+              <a href={settings.telegramConnectUrl} target="_blank" rel="noreferrer">
                 Подключить Telegram-бота
               </a>
             </Button>

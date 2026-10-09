@@ -127,6 +127,10 @@ const DEFAULT_SETTINGS: NotificationSettings = {
   telegramConnectUrl: "https://t.me/partiya_bot?start=demo",
   email: "a.korableva@kora.ru",
   phone: "+7 916 000-12-34",
+  // Как у бэка с настроенными SMTP и ботом; SMS-провайдера нет (DECISIONS.md, «Пилот»).
+  emailAvailable: true,
+  telegramAvailable: true,
+  smsAvailable: false,
 };
 
 const REASON_TITLES: Record<string, string> = {
@@ -213,6 +217,7 @@ export interface MockTrackingSlice {
   markNotificationsRead(body: MarkNotificationsReadBody): Promise<NotificationList>;
   getNotificationSettings(): Promise<NotificationSettings>;
   updateNotificationSettings(body: UpdateNotificationSettingsBody): Promise<NotificationSettings>;
+  disconnectTelegram(): Promise<NotificationSettings>;
   getUserCounters(): Promise<UserCounters>;
   streamUserEvents(options: {
     onNotification?: (item: NotificationItem) => void;
@@ -1149,6 +1154,22 @@ export function createTrackingSlice(ctx: TrackingContext): MockTrackingSlice {
           return { ...preference, channels: { ...preference.channels, ...patch.channels } };
         });
         const next: NotificationSettings = { ...current, preferences };
+        state.notificationSettings = next;
+        save();
+        return next;
+      });
+    },
+
+    disconnectTelegram(): Promise<NotificationSettings> {
+      return respond(async () => {
+        await ctx.requireCustomerOrg();
+        const state = getState();
+        const current = state.notificationSettings ?? DEFAULT_SETTINGS;
+        const next: NotificationSettings = {
+          ...current,
+          telegramConnected: false,
+          telegramConnectUrl: DEFAULT_SETTINGS.telegramConnectUrl,
+        };
         state.notificationSettings = next;
         save();
         return next;

@@ -70,6 +70,7 @@ export const installOrderMocks = (inner: ApiService): ApiService => {
     markNotificationsRead: (body) => api.markNotificationsRead(body),
     getNotificationSettings: () => api.getNotificationSettings(),
     updateNotificationSettings: (body) => api.updateNotificationSettings(body),
+    disconnectTelegram: () => api.disconnectTelegram(),
     getUserCounters: () => api.getUserCounters(),
     streamUserEvents: (options) => api.streamUserEvents(options),
 

@@ -4,6 +4,7 @@
      POST /notifications/read
      GET  /me/notification-settings
      PUT  /me/notification-settings
+     DELETE /me/notification-settings/telegram → отвязать чат Telegram
      GET  /me/counters
      GET  /me/stream                       → SSE: счётчики шапки и новые уведомления
 
@@ -90,6 +91,12 @@ export interface NotificationSettings {
   email?: string | null;
   /** Телефон для SMS. */
   phone?: string | null;
+  /** Почта настроена на сервере (SMTP). `false` — письма не отправляются вовсе. */
+  emailAvailable?: boolean;
+  /** Telegram-бот настроен на сервере. `false` — ссылки на подключение нет. */
+  telegramAvailable?: boolean;
+  /** SMS-провайдер подключён. Пока его нет — всегда `false`. */
+  smsAvailable?: boolean;
 }
 
 /** `PUT /me/notification-settings`. Присылаются только изменённые темы и только

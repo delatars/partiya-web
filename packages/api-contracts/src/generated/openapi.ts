@@ -858,7 +858,7 @@ export interface paths {
         };
         /**
          * Куда присылать уведомления
-         * @description ⚠ Хранятся ТОЛЬКО настройки: отправки в email, Telegram и SMS нет. Половина интеграции хуже честного её отсутствия, поэтому `telegramConnected` всегда `false`, а не «почти подключено».
+         * @description Почта уходит через SMTP, Telegram — через бота; SMS-провайдера нет. Канал, не настроенный на сервере, честно помечен `…Available: false`: отправки по нему нет вовсе. `telegramConnectUrl` — deep-link на бота с одноразовым кодом (живёт 30 минут) — выписывается заново на каждый запрос, пока чат не привязан.
          */
         get: operations["getNotificationSettings"];
         /**
@@ -868,6 +868,26 @@ export interface paths {
         put: operations["updateNotificationSettings"];
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/notification-settings/telegram": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Отключить Telegram
+         * @description Отвязать чат Telegram от вошедшего. Повтор безвреден. Ответ — настройки с новой ссылкой на подключение. Отвязать можно и из самого бота командой `/stop`.
+         */
+        delete: operations["disconnectTelegram"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4343,10 +4363,23 @@ export interface components {
         /** @description `GET /me/notification-settings`. */
         NotificationSettings: {
             email?: string | null;
+            /**
+             * @description Почта настроена на сервере (SMTP). `false` — письма не отправляются вовсе,
+             *     переключатели почты ничего не меняют.
+             */
+            emailAvailable: boolean;
             phone?: string | null;
             preferences: components["schemas"]["NotificationPreference"][];
+            /** @description SMS-провайдер подключён. Пока его нет — всегда `false`. */
+            smsAvailable: boolean;
+            /** @description Telegram-бот настроен на сервере. */
+            telegramAvailable: boolean;
             /** @description Подключён ли Telegram-бот. */
             telegramConnected: boolean;
+            /**
+             * @description Ссылка на бота с одноразовым кодом привязки (`https://t.me/<бот>?start=<код>`).
+             *     `null` — бот уже подключён или не настроен на сервере.
+             */
             telegramConnectUrl?: string | null;
         };
         /**
@@ -8634,6 +8667,26 @@ export interface operations {
         };
         responses: {
             /** @description Настройки после правки */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationSettings"];
+                };
+            };
+        };
+    };
+    disconnectTelegram: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Настройки после отключения */
             200: {
                 headers: {
                     [name: string]: unknown;
