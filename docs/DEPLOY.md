@@ -34,9 +34,36 @@ docker run --rm --entrypoint cat partiya-web:dev /dist/config.json   # useMocks:
 
 ## Публикация
 
-`.github/workflows/deploy-image.yml`: тег `v*` (или вручную с тегом) → образ
-`ghcr.io/<владелец>/partiya-web:<тег>` и `:sha-<коммит>`. Выкат делает workflow «Деплой» в
-partiya-api: бэк и фронт выкатываются вместе (новый `submit` требует тела оферты, Q-352),
-поэтому тег `vX.Y.Z` ставится в оба репозитория — деплой бэка ждёт этот образ.
-Пакету `partiya-web` в GHCR нужно дать доступ на чтение репозиторию `partiya-api`
-(Package settings → Manage Actions access).
+Образ `ghcr.io/<владелец>/partiya-web` собирает и публикует **workflow «Деплой» в
+partiya-api** (`partiya-api/.github/workflows/deploy.yml`, job «Образ web»): он выкачивает
+этот репозиторий по SSH deploy key и собирает этот `Dockerfile`. Своего workflow публикации
+здесь нет (прежний `deploy-image.yml` удалён): пакет GHCR принадлежит репозиторию, который
+его опубликовал, и если бы публиковали оба репозитория, одному из них пришлось бы вручную
+выдавать доступ к чужому пакету в UI. Бэк и фронт выкатываются вместе (новый `submit`
+требует тела оферты, Q-352).
+
+Какой коммит едет: при теге `vX.Y.Z` в partiya-api — тег `vX.Y.Z` **этого** репозитория,
+если он есть, иначе `master`; вручную — `web_ref` (ветка/тег/SHA). Поэтому перед релизом
+поставьте тег `vX.Y.Z` здесь. Хотфикс только фронта — «Деплой» вручную с `build_web`
+(таблица в `partiya-api/docs/DEPLOY.md`, «Обновление»). Проверить образ локально —
+`docker build` выше.
+
+Для этого в **partiya-web** → Settings → Deploy keys нужен read-only ключ, приватная часть
+которого лежит в секрете `WEB_REPO_SSH_KEY` репозитория partiya-api (команды —
+`partiya-api/docs/DEPLOY.md`, «Секреты и переменные GitHub Actions»).
+
+## CI: доступ к partiya-api
+
+Job «Дрейф типов контракта» (`.github/workflows/ci.yml`) выкачивает соседний приватный
+partiya-api ради `docs/openapi.json`. `GITHUB_TOKEN` прогона видит только этот репозиторий,
+поэтому — SSH deploy key:
+
+| Где | Что |
+|---|---|
+| partiya-api → Settings → Deploy keys | публичная часть, **без** «Allow write access» |
+| partiya-web → Settings → Secrets and variables → Actions → secret `API_REPO_SSH_KEY` | приватная часть |
+| там же, variable `API_REPO` (необяз.) | `владелец/репозиторий`, если не `<владелец>/partiya-api` |
+
+Ключ — отдельный от `WEB_REPO_SSH_KEY` (GitHub не принимает один deploy key в двух
+репозиториях). Без секрета (форк, PR из форка) job падает первым шагом с ошибкой
+«Нет секрета API_REPO_SSH_KEY».

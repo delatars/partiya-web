@@ -109,22 +109,32 @@ jobs:
     name: Дрейф типов контракта
     runs-on: ubuntu-latest
     # Снимок openapi.json живёт в СОСЕДНЕМ репозитории, в этом его нет. Поэтому job
-    # выкачивает partiya-api рядом и перегенерирует типы. Пока не решено, где живут
-    # репозитории и под каким токеном ходить в приватный, job не валит сборку.
-    # Альтернативы, если этот путь не подойдёт:
-    #   • копия openapi.json в этом репозитории + сверка хэша с оригиналом в CI бэкенда;
-    #   • публикация @partiya/api-contracts как пакета из CI бэкенда.
-    continue-on-error: true
+    # выкачивает partiya-api рядом и перегенерирует типы.
+    # partiya-api приватный, а GITHUB_TOKEN этого прогона видит только partiya-web —
+    # поэтому SSH deploy key (read-only) на partiya-api, приватная половина — в секрете
+    # API_REPO_SSH_KEY этого репозитория (docs/DEPLOY.md, «CI: доступ к partiya-api»).
+    # В форках и PR из форков секрета нет — job падает с понятной ошибкой.
     steps:
       - uses: actions/checkout@v7
+
+      - name: Ключ к репозиторию бэкенда
+        env:
+          API_REPO_SSH_KEY: ${{ secrets.API_REPO_SSH_KEY }}
+        run: |
+          if [ -z "$API_REPO_SSH_KEY" ]; then
+            echo "::error title=Нет секрета API_REPO_SSH_KEY::Нужен deploy key (read-only) на partiya-api, приватная часть — в секрете API_REPO_SSH_KEY. В форках секретов нет — см. docs/DEPLOY.md."
+            exit 1
+          fi
 
       - name: Репозиторий бэкенда
         uses: actions/checkout@v7
         with:
           # Переменная репозитория API_REPO, иначе сосед того же владельца.
           repository: ${{ vars.API_REPO || format('{0}/partiya-api', github.repository_owner) }}
-          # Для приватного репозитория нужен токен с доступом к нему.
-          token: ${{ secrets.API_REPO_TOKEN || github.token }}
+          # Ключ github.com checkout добавляет в known_hosts сам.
+          ssh-key: ${{ secrets.API_REPO_SSH_KEY }}
+          # Ключ нужен только на время выкачки — в git config его не оставляем.
+          persist-credentials: false
           path: .partiya-api
 
       - uses: ./.github/actions/setup

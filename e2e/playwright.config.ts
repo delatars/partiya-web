@@ -8,7 +8,11 @@ import { defineConfig, devices } from "@playwright/test";
    Порт 3120 (не 3000): 3000 на машине разработки занят. */
 
 const PORT = Number(process.env.E2E_PORT ?? 3120);
-const BASE_URL = process.env.E2E_BASE_URL ?? `http://127.0.0.1:${PORT}`;
+/* Хост задан явно и у сервера, и у URL. Без `--host` vite слушает «localhost», а Node
+   берёт первый адрес резолвера: в WSL это 127.0.0.1, на раннере GitHub — ::1. Тогда
+   preview жив на [::1], а Playwright ждёт 127.0.0.1 до таймаута webServer. */
+const HOST = "127.0.0.1";
+const BASE_URL = process.env.E2E_BASE_URL ?? `http://${HOST}:${PORT}`;
 
 export default defineConfig({
   testDir: "./tests",
@@ -53,11 +57,12 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `pnpm --filter @partiya/web exec vite preview --port ${PORT} --strictPort`,
+    command: `pnpm --filter @partiya/web exec vite preview --host ${HOST} --port ${PORT} --strictPort`,
     url: BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
-    stdout: "ignore",
+    /* Баннер vite («Local: http://…») в логе — сразу видно, где слушает сервер. */
+    stdout: "pipe",
     stderr: "pipe",
   },
 });
